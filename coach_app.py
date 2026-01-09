@@ -28,19 +28,16 @@ def get_google_sheet_client():
         "https://www.googleapis.com/auth/drive"
     ]
     try:
-        # 雲端模式 (Streamlit Cloud 專用)
+        # 嘗試從 Streamlit Secrets 讀取
         creds_dict = st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
         return client
-    except:
-        # 本地開發模式
-        try:
-            creds = Credentials.from_service_account_file(".streamlit/secrets.toml", scopes=scopes)
-            return None 
-        except Exception as e:
-            return None
-
+    except Exception as e:
+        # 如果失敗，印出錯誤原因
+        st.error(f"⚠️ 雲端連線失敗，錯誤原因：{e}")
+        return None
+        
 # --- 3. 資料讀取 ---
 @st.cache_data(ttl=3600)
 def load_static_data():
@@ -622,4 +619,5 @@ if client:
                                     st.dataframe(day_warmup[["ModuleName", "Exercise", "Sets", "Reps", "Note"]], hide_index=True, use_container_width=True)
                             if not day_main_recs.empty:
                                 st.caption("🏋️‍♂️ 主訓練紀錄")
+
                                 st.dataframe(day_main_recs[["Exercise", "Weight", "Reps", "Note"]], hide_index=True, use_container_width=True)
