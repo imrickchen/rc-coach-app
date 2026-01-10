@@ -5,20 +5,24 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 import time
 import altair as alt
+import os
 
 # --- 1. 設定頁面 (寬版佈局) ---
 st.set_page_config(page_title="RC Sports Performance", layout="wide")
 
-# --- 側邊欄品牌 Logo ---
-st.sidebar.markdown(
-    """
-    <div style='text-align: center; padding: 10px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;'>
-        <h2 style='color: #333; margin:0; font-weight: 800;'>RC SPORTS</h2>
-        <h5 style='color: #666; margin:0; letter-spacing: 1px;'>PERFORMANCE</h5>
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
+# --- 側邊欄品牌 Logo (優先讀取圖片) ---
+if os.path.exists("logo.png"):
+    st.sidebar.image("logo.png", use_container_width=True)
+else:
+    st.sidebar.markdown(
+        """
+        <div style='text-align: center; padding: 10px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;'>
+            <h2 style='color: #333; margin:0; font-weight: 800;'>RC SPORTS</h2>
+            <h5 style='color: #666; margin:0; letter-spacing: 1px;'>PERFORMANCE</h5>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
 
 # --- 2. 連線設定 ---
 @st.cache_resource
@@ -28,13 +32,11 @@ def get_google_sheet_client():
         "https://www.googleapis.com/auth/drive"
     ]
     try:
-        # 嘗試從 Streamlit Secrets 讀取
         creds_dict = st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        # 如果失敗，印出錯誤原因
         st.error(f"⚠️ 雲端連線失敗，錯誤原因：{e}")
         return None
         
@@ -49,7 +51,7 @@ def load_static_data():
         ws_students = sheet.worksheet("Students")
         ws_plan = sheet.worksheet("Plan")
         
-        # 1. 讀取 ExerciseDB (重點分析)
+        # 1. 讀取 ExerciseDB
         key_lifts = []
         try:
             ws_ex_db = sheet.worksheet("ExerciseDB")
@@ -68,7 +70,6 @@ def load_static_data():
                                     exercises.append(val.strip())
                             except IndexError:
                                 break
-                        
                         if cat_name == "⭐重點分析":
                             key_lifts = exercises
                         else:
@@ -98,7 +99,6 @@ def load_static_data():
         if not df_plan.empty:
             df_plan.columns = df_plan.columns.astype(str).str.strip()
 
-        # 處理學生資料
         students_dict = {}
         if not df_students.empty:
             for _, row in df_students.iterrows():
@@ -185,7 +185,7 @@ if client:
         app_mode = st.sidebar.radio("功能選單", ["今日訓練 (Workout)", "歷史查詢 (History)"])
 
         # ==========================================
-        # 🏋️‍♂️ 功能 A: 今日訓練 (雙欄 + 緊湊版)
+        # 🏋️‍♂️ 功能 A: 今日訓練 (回歸經典版 + 瘦身表格)
         # ==========================================
         if app_mode == "今日訓練 (Workout)":
             st.markdown("<h1 style='text-align: center; color: #333;'>📋 RC Sports - iPad 上課模式</h1>", unsafe_allow_html=True)
@@ -195,7 +195,7 @@ if client:
             left_col, right_col = st.columns([3, 7], gap="large")
 
             # ----------------------------------------------------
-            # 👈 左側欄 (準備區)
+            # 👈 左側欄 (準備區 - 保持原樣)
             # ----------------------------------------------------
             with left_col:
                 st.subheader("👤 學生與設定")
@@ -204,14 +204,13 @@ if client:
                 cmj_static_base = float(student_data.get("cmj_static", 0))
                 student_memo = student_data.get("memo", "")
 
-                # CMJ 輸入重置邏輯 (修正警告版)
+                # CMJ 輸入重置邏輯
                 if 'last_student_key' not in st.session_state:
                     st.session_state['last_student_key'] = student_key
                 if st.session_state['last_student_key'] != student_key:
-                    st.session_state['cmj_input'] = 0.0 # 切換學生歸零
+                    st.session_state['cmj_input'] = 0.0
                     st.session_state['last_student_key'] = student_key
                 
-                # 確保初始化
                 if 'cmj_input' not in st.session_state:
                     st.session_state['cmj_input'] = 0.0
 
@@ -242,7 +241,7 @@ if client:
                             st.error(f"更新失敗: {e}")
 
                 # --- ⚖️ 身體組成 ---
-                with st.expander("⚖️ 身體數值 (Body Comp)", expanded=False):
+                with st.expander("⚖️ 身體數值", expanded=False):
                     last_weight = 0
                     if not df_body_comp.empty:
                          stu_bc = df_body_comp[df_body_comp["StudentID"] == student_key].sort_values("Date")
@@ -332,10 +331,10 @@ if client:
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # ----------------------------------------------------
-            # 👉 右側欄 (訓練區)
+            # 👉 右側欄 (訓練區 - 恢復 Dashboard 佈局)
             # ----------------------------------------------------
             with right_col:
-                # --- 1. 頂部儀表板 ---
+                # --- 1. 頂部儀表板 (Revert to Metrics) ---
                 st.subheader("📊 訓練概況")
                 m1, m2, m3 = st.columns(3)
                 
@@ -359,7 +358,7 @@ if client:
                 m1.metric("上次訓練", last_date_str, days_gap_str, delta_color="inverse")
                 m2.metric("上次課表", last_plan_str)
                 
-                # 智慧狀態判斷
+                # 智慧狀態判斷 (Logic preserved from upload)
                 current_cmj = st.session_state.get('cmj_input', 0.0)
                 status_label = "⏳ 等待測量"
                 status_val = "-"
@@ -387,13 +386,12 @@ if client:
 
                 st.divider()
 
-                # --- 2. CMJ 檢測 ---
+                # --- 2. CMJ 檢測 (保持原樣) ---
                 with st.container():
                     st.caption("🐇 賽前/訓前 CMJ 狀態檢測")
                     c_cmj1, c_cmj2, c_cmj3 = st.columns([2, 2, 2])
                     baseline_val = cmj_static_base
                     with c_cmj1:
-                        # 🔥 修正警告：這裡移除了 value=0.0，完全依靠 session_state 的 'cmj_input'
                         today_cmj = st.number_input("CMJ (cm)", step=0.5, label_visibility="collapsed", key="cmj_input")
                     with c_cmj2:
                         if baseline_val > 0:
@@ -406,7 +404,7 @@ if client:
 
                 st.write("") 
 
-                # --- 3. 主訓練課表 ---
+                # --- 3. 主訓練課表 (✨ 重點修改區：備註 + 瘦身) ---
                 st.markdown("""
                     <div style="background-color: #F0F8FF; padding: 20px; border-radius: 15px; border: 1px solid #E6F3FF;">
                     <h3 style="margin-top:0;">🏋️‍♂️ 主訓練 (Main Workout)</h3>
@@ -421,7 +419,7 @@ if client:
                     day = st.selectbox("選擇進度", days, label_visibility="collapsed", placeholder="選擇天數...")
 
                 if plan_name and day:
-                    # 🔥 頁面切換防丟失邏輯 (Anti-Loss Logic)
+                    # 防丟失邏輯
                     current_context = (student_key, plan_name, day)
                     
                     if 'last_context' not in st.session_state or st.session_state['last_context'] != current_context:
@@ -438,14 +436,18 @@ if client:
                                 fmt_int = f"{int(val * 100)}%" if val <= 1 else f"{val}"
                             except:
                                 fmt_int = str(raw_int)
+                                
+                            # ✅ 修正點 1: 確實抓取備註
+                            note_content = row.get("Note", "")
+
                             for s in range(1, int(row["Sets"]) + 1):
                                 rows.append({
-                                    "編號": str(row["Order"]), "動作名稱": row["Exercise"], "組數": f"Set {s}",
+                                    "編號": str(row["Order"]), "動作名稱": row["Exercise"], "組數": f"{s}", # 簡化
                                     "計畫次數": row["Reps"], "強度 (%)": fmt_int,
                                     "建議重量": w, 
                                     "實際重量 (kg)": None, 
                                     "實際次數": row["Reps"],
-                                    "備註": ""
+                                    "備註": note_content # ✅ 填入備註
                                 })
                         st.session_state['workout_df'] = pd.DataFrame(rows)
                         st.session_state['last_context'] = current_context
@@ -453,15 +455,23 @@ if client:
                     cols = ["編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
 
+                    # ✅ 修正點 2: 表格瘦身 (Slim Config)
                     edited_df = st.data_editor(
                         st.session_state['workout_df'], 
                         hide_index=True, 
                         use_container_width=True, 
                         num_rows="dynamic",
+                        height=500,
                         column_config={
-                            "強度 (%)": st.column_config.TextColumn(disabled=True),
-                            "實際重量 (kg)": st.column_config.NumberColumn(min_value=0, max_value=500, step=0.5), 
-                            "實際次數": st.column_config.NumberColumn(min_value=0, max_value=100, step=1)
+                            "編號": st.column_config.TextColumn(width="small"),
+                            "動作名稱": st.column_config.TextColumn(width="large", required=True),
+                            "組數": st.column_config.TextColumn(width="small"),
+                            "計畫次數": st.column_config.NumberColumn("次數", width="small"),
+                            "強度 (%)": st.column_config.TextColumn("強度", width="small"),
+                            "建議重量": st.column_config.NumberColumn("建議 kg", width="small"),
+                            "實際重量 (kg)": st.column_config.NumberColumn("實際 kg", min_value=0, max_value=500, step=0.5, width="small"), 
+                            "實際次數": st.column_config.NumberColumn("實作次數", min_value=0, max_value=100, step=1, width="small"),
+                            "備註": st.column_config.TextColumn(width="medium")
                         }
                     )
                     
@@ -473,7 +483,7 @@ if client:
                     progress = filled_sets / total_sets if total_sets > 0 else 0
                     st.progress(progress, text=f"目前進度: {filled_sets}/{total_sets} 組")
 
-                    # 歷史快查
+                    # 歷史快查 (保持功能)
                     current_exercises = st.session_state['workout_df']['動作名稱'].unique().tolist()
                     with st.expander("🔎 歷史數據快查 (Quick Look)", expanded=False):
                         ql_exercise = st.selectbox("選擇動作:", current_exercises)
@@ -519,7 +529,7 @@ if client:
                 st.markdown("</div>", unsafe_allow_html=True)
 
         # ==========================================
-        # 🔍 功能 B: 歷史查詢 (漸進式揭露版)
+        # 🔍 功能 B: 歷史查詢 (保持原樣)
         # ==========================================
         elif app_mode == "歷史查詢 (History)":
             st.header("🔍 歷史紀錄")
@@ -557,7 +567,6 @@ if client:
 
                     with col_h2:
                         st.subheader("🏋️‍♂️ 肌力分析 (1RM)")
-                        
                         if key_lifts:
                             target_list = key_lifts 
                         else:
