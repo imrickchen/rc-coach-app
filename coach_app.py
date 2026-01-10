@@ -185,17 +185,18 @@ if client:
         app_mode = st.sidebar.radio("功能選單", ["今日訓練 (Workout)", "歷史查詢 (History)"])
 
         # ==========================================
-        # 🏋️‍♂️ 功能 A: 今日訓練 (回歸經典版 + 瘦身表格)
+        # 🏋️‍♂️ 功能 A: 今日訓練
         # ==========================================
         if app_mode == "今日訓練 (Workout)":
-            st.markdown("<h1 style='text-align: center; color: #333;'>📋 RC Sports - iPad 上課模式</h1>", unsafe_allow_html=True)
+            # ✅ 修改點 1: 標題更新 (移除圖示)
+            st.markdown("<h1 style='text-align: center; color: #333;'>RC SPORTS PERFORMANCE</h1>", unsafe_allow_html=True)
             st.write("")
             
             # 建立雙欄位佈局
             left_col, right_col = st.columns([3, 7], gap="large")
 
             # ----------------------------------------------------
-            # 👈 左側欄 (準備區 - 保持原樣)
+            # 👈 左側欄 (準備區)
             # ----------------------------------------------------
             with left_col:
                 st.subheader("👤 學生與設定")
@@ -266,10 +267,10 @@ if client:
 
                 st.write("") 
 
-                # --- 🔥 暖身系統 ---
+                # --- 🔥 暖身系統 (✅ 修改點 2: 縮小框框) ---
                 st.markdown("""
-                    <div style="background-color: #FFF5F5; padding: 20px; border-radius: 15px; border: 1px solid #FFEEEE;">
-                    <h3 style="margin-top:0;">🔥 暖身環節</h3>
+                    <div style="background-color: #FFF5F5; padding: 10px; border-radius: 10px; border: 1px solid #FFEEEE;">
+                    <h3 style="margin: 0; color: #333; font-size: 1.2rem;">🔥 暖身環節</h3>
                 """, unsafe_allow_html=True)
 
                 warmup_options = ["(自定義 / 空白)"]
@@ -331,10 +332,10 @@ if client:
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # ----------------------------------------------------
-            # 👉 右側欄 (訓練區 - 恢復 Dashboard 佈局)
+            # 👉 右側欄 (訓練區)
             # ----------------------------------------------------
             with right_col:
-                # --- 1. 頂部儀表板 (Revert to Metrics) ---
+                # --- 1. 頂部儀表板 ---
                 st.subheader("📊 訓練概況")
                 m1, m2, m3 = st.columns(3)
                 
@@ -358,7 +359,7 @@ if client:
                 m1.metric("上次訓練", last_date_str, days_gap_str, delta_color="inverse")
                 m2.metric("上次課表", last_plan_str)
                 
-                # 智慧狀態判斷 (Logic preserved from upload)
+                # 智慧狀態判斷
                 current_cmj = st.session_state.get('cmj_input', 0.0)
                 status_label = "⏳ 等待測量"
                 status_val = "-"
@@ -384,9 +385,9 @@ if client:
 
                 m3.metric("學員狀態", status_label, status_delta, delta_color=status_color)
 
-                st.divider()
+                # ✅ 修改點 3: 移除 st.divider() (這行被刪除了)
 
-                # --- 2. CMJ 檢測 (保持原樣) ---
+                # --- 2. CMJ 檢測 ---
                 with st.container():
                     st.caption("🐇 賽前/訓前 CMJ 狀態檢測")
                     c_cmj1, c_cmj2, c_cmj3 = st.columns([2, 2, 2])
@@ -404,7 +405,7 @@ if client:
 
                 st.write("") 
 
-                # --- 3. 主訓練課表 (✨ 重點修改區：備註 + 瘦身) ---
+                # --- 3. 主訓練課表 ---
                 st.markdown("""
                     <div style="background-color: #F0F8FF; padding: 20px; border-radius: 15px; border: 1px solid #E6F3FF;">
                     <h3 style="margin-top:0;">🏋️‍♂️ 主訓練 (Main Workout)</h3>
@@ -437,17 +438,16 @@ if client:
                             except:
                                 fmt_int = str(raw_int)
                                 
-                            # ✅ 修正點 1: 確實抓取備註
                             note_content = row.get("Note", "")
 
                             for s in range(1, int(row["Sets"]) + 1):
                                 rows.append({
-                                    "編號": str(row["Order"]), "動作名稱": row["Exercise"], "組數": f"{s}", # 簡化
+                                    "編號": str(row["Order"]), "動作名稱": row["Exercise"], "組數": f"{s}",
                                     "計畫次數": row["Reps"], "強度 (%)": fmt_int,
                                     "建議重量": w, 
                                     "實際重量 (kg)": None, 
                                     "實際次數": row["Reps"],
-                                    "備註": note_content # ✅ 填入備註
+                                    "備註": note_content
                                 })
                         st.session_state['workout_df'] = pd.DataFrame(rows)
                         st.session_state['last_context'] = current_context
@@ -455,16 +455,15 @@ if client:
                     cols = ["編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
 
-                    # ✅ 修正點 2: 表格瘦身 (Slim Config)
+                    # ✅ 修改點 4: 移除 height=500，實現自動高度
                     edited_df = st.data_editor(
                         st.session_state['workout_df'], 
                         hide_index=True, 
                         use_container_width=True, 
                         num_rows="dynamic",
-                        height=500,
+                        # height=500,  <-- 已移除此行
                         column_config={
                             "編號": st.column_config.TextColumn(width="small"),
-                            "動作名稱": st.column_config.TextColumn(width="large", required=True),
                             "組數": st.column_config.TextColumn(width="small"),
                             "計畫次數": st.column_config.NumberColumn("次數", width="small"),
                             "強度 (%)": st.column_config.TextColumn("強度", width="small"),
@@ -483,7 +482,7 @@ if client:
                     progress = filled_sets / total_sets if total_sets > 0 else 0
                     st.progress(progress, text=f"目前進度: {filled_sets}/{total_sets} 組")
 
-                    # 歷史快查 (保持功能)
+                    # 歷史快查
                     current_exercises = st.session_state['workout_df']['動作名稱'].unique().tolist()
                     with st.expander("🔎 歷史數據快查 (Quick Look)", expanded=False):
                         ql_exercise = st.selectbox("選擇動作:", current_exercises)
