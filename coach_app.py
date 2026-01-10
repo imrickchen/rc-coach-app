@@ -188,7 +188,6 @@ if client:
         # 🏋️‍♂️ 功能 A: 今日訓練
         # ==========================================
         if app_mode == "今日訓練 (Workout)":
-            # ✅ 修改點 1: 標題更新 (移除圖示)
             st.markdown("<h1 style='text-align: center; color: #333;'>RC SPORTS PERFORMANCE</h1>", unsafe_allow_html=True)
             st.write("")
             
@@ -209,11 +208,11 @@ if client:
                 if 'last_student_key' not in st.session_state:
                     st.session_state['last_student_key'] = student_key
                 if st.session_state['last_student_key'] != student_key:
-                    st.session_state['cmj_input'] = 0.0
+                    st.session_state['cmj_input'] = None # 重置為 None
                     st.session_state['last_student_key'] = student_key
                 
                 if 'cmj_input' not in st.session_state:
-                    st.session_state['cmj_input'] = 0.0
+                    st.session_state['cmj_input'] = None
 
                 selected_date = st.date_input("訓練日期", value=datetime.now())
                 record_date_str = selected_date.strftime("%Y-%m-%d")
@@ -241,7 +240,7 @@ if client:
                         except Exception as e:
                             st.error(f"更新失敗: {e}")
 
-                # --- ⚖️ 身體組成 ---
+                # --- ⚖️ 身體組成 (✅ 優化點: 預設空值) ---
                 with st.expander("⚖️ 身體數值", expanded=False):
                     last_weight = 0
                     if not df_body_comp.empty:
@@ -249,25 +248,32 @@ if client:
                          if not stu_bc.empty:
                              last_weight = float(stu_bc.iloc[-1]["Weight"])
 
-                    in_weight = st.number_input("體重 (kg)", step=0.1)
-                    if last_weight > 0 and in_weight > 0:
+                    # 設定 value=None, placeholder
+                    in_weight = st.number_input("體重 (kg)", step=0.1, value=None, placeholder="請輸入體重...")
+                    
+                    if last_weight > 0 and in_weight is not None:
                         delta_w = in_weight - last_weight
                         st.metric("體重變化", f"{in_weight} kg", f"{delta_w:.1f} kg", delta_color="inverse")
                     
-                    in_fat = st.number_input("體脂率 (%)", step=0.1)
-                    in_muscle = st.number_input("骨骼肌 (kg)", step=0.1)
+                    in_fat = st.number_input("體脂率 (%)", step=0.1, value=None)
+                    in_muscle = st.number_input("骨骼肌 (kg)", step=0.1, value=None)
                     in_note = st.text_input("測量備註")
                     
                     if st.button("✅ 存入數值"):
+                        # 處理 None 值
+                        save_weight = in_weight if in_weight is not None else 0
+                        save_fat = in_fat if in_fat is not None else 0
+                        save_muscle = in_muscle if in_muscle is not None else 0
+                        
                         if ws_body_comp:
-                            ws_body_comp.append_rows([[record_date_str, student_key, in_weight, in_fat, in_muscle, in_note]])
+                            ws_body_comp.append_rows([[record_date_str, student_key, save_weight, save_fat, save_muscle, in_note]])
                             st.toast("✅ 身體數值已儲存！")
                             time.sleep(1)
                             st.rerun()
 
                 st.write("") 
 
-                # --- 🔥 暖身系統 (✅ 修改點 2: 縮小框框) ---
+                # --- 🔥 暖身系統 ---
                 st.markdown("""
                     <div style="background-color: #FFF5F5; padding: 10px; border-radius: 10px; border: 1px solid #FFEEEE;">
                     <h3 style="margin: 0; color: #333; font-size: 1.2rem;">🔥 暖身環節</h3>
@@ -357,19 +363,26 @@ if client:
                         last_plan_str = f"{last_rec['PlanName']} ({last_rec['Day']})"
 
                 m1.metric("上次訓練", last_date_str, days_gap_str, delta_color="inverse")
-                m2.metric("上次課表", last_plan_str)
+                
+                # ✅ 優化點: 上次課表使用 Markdown 自動換行
+                with m2:
+                    st.caption("上次課表")
+                    st.markdown(f"**{last_plan_str}**")
                 
                 # 智慧狀態判斷
-                current_cmj = st.session_state.get('cmj_input', 0.0)
+                current_cmj = st.session_state.get('cmj_input') 
+                # 處理 None
+                safe_cmj = current_cmj if current_cmj is not None else 0.0
+                
                 status_label = "⏳ 等待測量"
                 status_val = "-"
                 status_delta = None
                 status_color = "off"
 
-                if current_cmj > 0 and cmj_static_base > 0:
-                    ratio = current_cmj / cmj_static_base
-                    diff = current_cmj - cmj_static_base
-                    status_val = f"{current_cmj} cm"
+                if safe_cmj > 0 and cmj_static_base > 0:
+                    ratio = safe_cmj / cmj_static_base
+                    diff = safe_cmj - cmj_static_base
+                    status_val = f"{safe_cmj} cm"
                     if ratio >= 0.95:
                         status_label = "🚀 狀態極佳"
                         status_delta = f"+{diff:.1f} cm"
@@ -385,23 +398,24 @@ if client:
 
                 m3.metric("學員狀態", status_label, status_delta, delta_color=status_color)
 
-                # ✅ 修改點 3: 移除 st.divider() (這行被刪除了)
-
-                # --- 2. CMJ 檢測 ---
+                # --- 2. CMJ 檢測 (✅ 優化點: 預設空值) ---
                 with st.container():
                     st.caption("🐇 賽前/訓前 CMJ 狀態檢測")
                     c_cmj1, c_cmj2, c_cmj3 = st.columns([2, 2, 2])
                     baseline_val = cmj_static_base
                     with c_cmj1:
-                        today_cmj = st.number_input("CMJ (cm)", step=0.5, label_visibility="collapsed", key="cmj_input")
+                        # value=None
+                        today_cmj = st.number_input("CMJ (cm)", step=0.5, label_visibility="collapsed", key="cmj_input", value=None, placeholder="輸入 CMJ...")
                     with c_cmj2:
                         if baseline_val > 0:
                             st.caption(f"基準: {baseline_val} cm")
                     with c_cmj3:
                          if st.button("紀錄 CMJ", use_container_width=True):
-                            if today_cmj > 0:
+                            if today_cmj is not None and today_cmj > 0:
                                 ws_history.append_rows([[record_date_str, student_key, "CMJ_Check", "Day_0", "Countermovement Jump", 0, today_cmj, f"Base:{baseline_val:.1f}"]])
                                 st.toast("✅ CMJ 已存檔！")
+                            else:
+                                st.warning("請輸入數值")
 
                 st.write("") 
 
@@ -455,13 +469,11 @@ if client:
                     cols = ["編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
 
-                    # ✅ 修改點 4: 移除 height=500，實現自動高度
                     edited_df = st.data_editor(
                         st.session_state['workout_df'], 
                         hide_index=True, 
                         use_container_width=True, 
                         num_rows="dynamic",
-                        # height=500,  <-- 已移除此行
                         column_config={
                             "編號": st.column_config.TextColumn(width="small"),
                             "組數": st.column_config.TextColumn(width="small"),
