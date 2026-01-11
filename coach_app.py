@@ -107,12 +107,12 @@ def load_static_data():
                 key = f"{name} ({sid})"
                 rm_data = {k.replace("_1RM", ""): v for k, v in row.items() if "_1RM" in k and pd.notna(v) and v != ""}
                 
-                # 🔥【修復重點】安全處理 CMJ 數值，防止空值導致崩潰
+                # 防呆第一道鎖：讀取時如果爛掉，就設為 0
                 raw_cmj = row.get("CMJ_Baseline", 0)
                 try:
                     cmj_static = float(raw_cmj)
                 except (ValueError, TypeError):
-                    cmj_static = 0.0 # 如果是空白或文字，自動設為 0
+                    cmj_static = 0.0
 
                 memo_txt = row.get("Memo", "")
                 
@@ -208,14 +208,20 @@ if client:
                 st.subheader("👤 學生與設定")
                 student_key = st.selectbox("選擇學生", list(students_dict.keys()))
                 student_data = students_dict.get(student_key, {})
-                cmj_static_base = float(student_data.get("cmj_static", 0))
+                
+                # 🔥 防呆第二道鎖：這裡再檢查一次，防止舊快取讓程式當機
+                try:
+                    cmj_static_base = float(student_data.get("cmj_static", 0))
+                except (ValueError, TypeError):
+                    cmj_static_base = 0.0
+                
                 student_memo = student_data.get("memo", "")
 
                 # CMJ 輸入重置邏輯
                 if 'last_student_key' not in st.session_state:
                     st.session_state['last_student_key'] = student_key
                 if st.session_state['last_student_key'] != student_key:
-                    st.session_state['cmj_input'] = None # 重置為 None
+                    st.session_state['cmj_input'] = None
                     st.session_state['last_student_key'] = student_key
                 
                 if 'cmj_input' not in st.session_state:
@@ -247,7 +253,7 @@ if client:
                         except Exception as e:
                             st.error(f"更新失敗: {e}")
 
-                # --- ⚖️ 身體組成 (預設空值) ---
+                # --- ⚖️ 身體組成 ---
                 with st.expander("⚖️ 身體數值", expanded=False):
                     last_weight = 0
                     if not df_body_comp.empty:
@@ -255,7 +261,6 @@ if client:
                          if not stu_bc.empty:
                              last_weight = float(stu_bc.iloc[-1]["Weight"])
 
-                    # 設定 value=None, placeholder
                     in_weight = st.number_input("體重 (kg)", step=0.1, value=None, placeholder="請輸入體重...")
                     
                     if last_weight > 0 and in_weight is not None:
@@ -267,7 +272,6 @@ if client:
                     in_note = st.text_input("測量備註")
                     
                     if st.button("✅ 存入數值"):
-                        # 處理 None 值
                         save_weight = in_weight if in_weight is not None else 0
                         save_fat = in_fat if in_fat is not None else 0
                         save_muscle = in_muscle if in_muscle is not None else 0
@@ -371,14 +375,12 @@ if client:
 
                 m1.metric("上次訓練", last_date_str, days_gap_str, delta_color="inverse")
                 
-                # ✅ 上次課表使用 Markdown 自動換行
                 with m2:
                     st.caption("上次課表")
                     st.markdown(f"**{last_plan_str}**")
                 
                 # 智慧狀態判斷
                 current_cmj = st.session_state.get('cmj_input') 
-                # 處理 None
                 safe_cmj = current_cmj if current_cmj is not None else 0.0
                 
                 status_label = "⏳ 等待測量"
@@ -386,6 +388,7 @@ if client:
                 status_delta = None
                 status_color = "off"
 
+                # 使用安全轉換後的 cmj_static_base
                 if safe_cmj > 0 and cmj_static_base > 0:
                     ratio = safe_cmj / cmj_static_base
                     diff = safe_cmj - cmj_static_base
@@ -405,13 +408,12 @@ if client:
 
                 m3.metric("學員狀態", status_label, status_delta, delta_color=status_color)
 
-                # --- 2. CMJ 檢測 (預設空值) ---
+                # --- 2. CMJ 檢測 ---
                 with st.container():
                     st.caption("🐇 賽前/訓前 CMJ 狀態檢測")
                     c_cmj1, c_cmj2, c_cmj3 = st.columns([2, 2, 2])
                     baseline_val = cmj_static_base
                     with c_cmj1:
-                        # value=None
                         today_cmj = st.number_input("CMJ (cm)", step=0.5, label_visibility="collapsed", key="cmj_input", value=None, placeholder="輸入 CMJ...")
                     with c_cmj2:
                         if baseline_val > 0:
@@ -441,7 +443,6 @@ if client:
                     day = st.selectbox("選擇進度", days, label_visibility="collapsed", placeholder="選擇天數...")
 
                 if plan_name and day:
-                    # 防丟失邏輯
                     current_context = (student_key, plan_name, day)
                     
                     if 'last_context' not in st.session_state or st.session_state['last_context'] != current_context:
