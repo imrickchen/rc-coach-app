@@ -106,7 +106,14 @@ def load_static_data():
                 sid = row.get('StudentID', '000')
                 key = f"{name} ({sid})"
                 rm_data = {k.replace("_1RM", ""): v for k, v in row.items() if "_1RM" in k and pd.notna(v) and v != ""}
-                cmj_static = row.get("CMJ_Baseline", 0)
+                
+                # 🔥【修復重點】安全處理 CMJ 數值，防止空值導致崩潰
+                raw_cmj = row.get("CMJ_Baseline", 0)
+                try:
+                    cmj_static = float(raw_cmj)
+                except (ValueError, TypeError):
+                    cmj_static = 0.0 # 如果是空白或文字，自動設為 0
+
                 memo_txt = row.get("Memo", "")
                 
                 students_dict[key] = {
@@ -240,7 +247,7 @@ if client:
                         except Exception as e:
                             st.error(f"更新失敗: {e}")
 
-                # --- ⚖️ 身體組成 (✅ 優化點: 預設空值) ---
+                # --- ⚖️ 身體組成 (預設空值) ---
                 with st.expander("⚖️ 身體數值", expanded=False):
                     last_weight = 0
                     if not df_body_comp.empty:
@@ -364,7 +371,7 @@ if client:
 
                 m1.metric("上次訓練", last_date_str, days_gap_str, delta_color="inverse")
                 
-                # ✅ 優化點: 上次課表使用 Markdown 自動換行
+                # ✅ 上次課表使用 Markdown 自動換行
                 with m2:
                     st.caption("上次課表")
                     st.markdown(f"**{last_plan_str}**")
@@ -398,7 +405,7 @@ if client:
 
                 m3.metric("學員狀態", status_label, status_delta, delta_color=status_color)
 
-                # --- 2. CMJ 檢測 (✅ 優化點: 預設空值) ---
+                # --- 2. CMJ 檢測 (預設空值) ---
                 with st.container():
                     st.caption("🐇 賽前/訓前 CMJ 狀態檢測")
                     c_cmj1, c_cmj2, c_cmj3 = st.columns([2, 2, 2])
