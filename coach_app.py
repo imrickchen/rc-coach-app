@@ -202,7 +202,7 @@ if client:
 
         st.sidebar.divider()
 
-        # 3. 1RM 計算與重整 (保留)
+        # 3. 1RM 計算與重整
         st.sidebar.caption("🔧 1RM 快速換算")
         calc_w = st.sidebar.number_input("重量 (kg)", 0, 300, 60)
         calc_r = st.sidebar.number_input("次數 (reps)", 1, 30, 5)
@@ -221,7 +221,7 @@ if client:
         app_mode = st.sidebar.radio("功能選單", ["今日訓練 (Workout)", "歷史查詢 (History)"])
 
         # ==========================================
-        # 🏋️‍♂️ 功能 A: 今日訓練 (新版面配置)
+        # 🏋️‍♂️ 功能 A: 今日訓練
         # ==========================================
         if app_mode == "今日訓練 (Workout)":
             
@@ -258,7 +258,9 @@ if client:
                 st.markdown(f"**📅 上次訓練:** {last_date_str} ({days_gap_str})")
                 st.caption("上次課表:")
                 st.markdown(f"> {last_plan_str}")
-                st.divider()
+                
+                # ✅ 移除分隔線
+                # st.divider()
 
                 # 3. 學員狀態 (CMJ)
                 current_cmj = st.session_state.get('cmj_input') 
@@ -324,7 +326,7 @@ if client:
                         inbody_done = True
                         last_rec = today_bc.iloc[-1]
                         inbody_btn_label = f"✅ 本日已紀錄 ({last_rec['Weight']}kg)"
-                        inbody_btn_type = "primary" # 綠色樣式 (Streamlit primary is usually colored)
+                        inbody_btn_type = "primary" # 綠色樣式
 
                 st.markdown("### ⚖️ 身體數值")
                 
@@ -445,7 +447,8 @@ if client:
                         st.warning("表格為空")
 
                 st.write("")
-                st.divider()
+                # ✅ 移除分隔線
+                # st.divider()
 
                 # === 第二區：CMJ 檢測 ===
                 st.markdown("### 🐇 CMJ 檢測")
@@ -483,7 +486,8 @@ if client:
                             st.warning("請輸入數值")
 
                 st.write("")
-                st.divider()
+                # ✅ 移除分隔線
+                # st.divider()
 
                 # === 第三區：主訓練 ===
                 
@@ -658,6 +662,7 @@ if client:
 
                     with col_h2:
                         st.subheader("🏋️‍♂️ 肌力分析 (1RM)")
+                        
                         if key_lifts:
                             target_list = key_lifts 
                         else:
