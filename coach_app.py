@@ -10,7 +10,11 @@ import os
 # --- 1. 設定頁面 (寬版佈局) ---
 st.set_page_config(page_title="RC Sports Performance", layout="wide")
 
-# --- 側邊欄品牌 Logo (優先讀取圖片) ---
+# ==========================================
+# 🛠️ 側邊欄 (Global Settings)
+# ==========================================
+
+# 1. Logo
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 else:
@@ -24,7 +28,9 @@ else:
         unsafe_allow_html=True
     )
 
-# --- 2. 連線設定 ---
+st.sidebar.divider()
+
+# --- 資料庫連線函式 ---
 @st.cache_resource
 def get_google_sheet_client():
     scopes = [
@@ -39,8 +45,8 @@ def get_google_sheet_client():
     except Exception as e:
         st.error(f"⚠️ 雲端連線失敗，錯誤原因：{e}")
         return None
-        
-# --- 3. 資料讀取 ---
+
+# --- 資料讀取函式 ---
 @st.cache_data(ttl=3600)
 def load_static_data():
     client = get_google_sheet_client()
@@ -51,7 +57,7 @@ def load_static_data():
         ws_students = sheet.worksheet("Students")
         ws_plan = sheet.worksheet("Plan")
         
-        # 1. 讀取 ExerciseDB
+        # ExerciseDB
         key_lifts = []
         try:
             ws_ex_db = sheet.worksheet("ExerciseDB")
@@ -77,7 +83,7 @@ def load_static_data():
         except:
             exercise_db = {}
 
-        # 2. 讀取 Warmup_Modules
+        # Warmup Modules
         try:
             ws_warmup_mod = sheet.worksheet("Warmup_Modules")
             raw_data = ws_warmup_mod.get_all_values()
@@ -90,7 +96,7 @@ def load_static_data():
         except:
             df_warmup_modules = pd.DataFrame()
 
-        # 3. 讀取學生與主課表
+        # Students & Plan
         df_students = pd.DataFrame(ws_students.get_all_records())
         df_plan = pd.DataFrame(ws_plan.get_all_records())
 
@@ -107,7 +113,7 @@ def load_static_data():
                 key = f"{name} ({sid})"
                 rm_data = {k.replace("_1RM", ""): v for k, v in row.items() if "_1RM" in k and pd.notna(v) and v != ""}
                 
-                # 防呆：CMJ 數值轉換
+                # CMJ 防呆
                 raw_cmj = row.get("CMJ_Baseline", 0)
                 try:
                     cmj_static = float(raw_cmj)
@@ -127,7 +133,7 @@ def load_static_data():
     except Exception as e:
         return {}, pd.DataFrame(), {}, pd.DataFrame(), []
 
-# B. 動態資料 (每次重整都會重新拉取，確保狀態顯示正確)
+# 動態資料讀取
 def get_history_worksheets():
     client = get_google_sheet_client()
     if not client: return None, None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -158,7 +164,7 @@ def get_history_worksheets():
     except Exception as e:
         return None, None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# --- 初始化 ---
+# --- 初始化資料 ---
 client = get_google_sheet_client()
 
 if client:
@@ -166,7 +172,37 @@ if client:
     ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp = get_history_worksheets()
 
     if students_dict:
-        # --- 側邊欄工具 (移除了計時器) ---
+        # 2. 學生與日期選擇 (移至側邊欄)
+        st.sidebar.subheader("👤 學生與日期")
+        student_key = st.sidebar.selectbox("選擇學生", list(students_dict.keys()))
+        
+        # 學生資料讀取
+        student_data = students_dict.get(student_key, {})
+        try:
+            cmj_static_base = float(student_data.get("cmj_static", 0))
+        except:
+            cmj_static_base = 0.0
+        student_memo = student_data.get("memo", "")
+
+        # Session State 初始化
+        if 'last_student_key' not in st.session_state:
+            st.session_state['last_student_key'] = student_key
+        if st.session_state['last_student_key'] != student_key:
+            st.session_state['cmj_input'] = None
+            st.session_state['saved_signatures'] = set()
+            st.session_state['last_student_key'] = student_key
+        
+        if 'saved_signatures' not in st.session_state:
+            st.session_state['saved_signatures'] = set()
+        if 'cmj_input' not in st.session_state:
+            st.session_state['cmj_input'] = None
+
+        selected_date = st.sidebar.date_input("訓練日期", value=datetime.now())
+        record_date_str = selected_date.strftime("%Y-%m-%d")
+
+        st.sidebar.divider()
+
+        # 3. 1RM 計算與重整 (保留)
         st.sidebar.caption("🔧 1RM 快速換算")
         calc_w = st.sidebar.number_input("重量 (kg)", 0, 300, 60)
         calc_r = st.sidebar.number_input("次數 (reps)", 1, 30, 5)
@@ -185,213 +221,23 @@ if client:
         app_mode = st.sidebar.radio("功能選單", ["今日訓練 (Workout)", "歷史查詢 (History)"])
 
         # ==========================================
-        # 🏋️‍♂️ 功能 A: 今日訓練
+        # 🏋️‍♂️ 功能 A: 今日訓練 (新版面配置)
         # ==========================================
         if app_mode == "今日訓練 (Workout)":
-            st.markdown("<h1 style='text-align: center; color: #333;'>RC SPORTS PERFORMANCE</h1>", unsafe_allow_html=True)
-            st.write("")
             
-            # 建立雙欄位佈局
+            # 建立左右欄 (左30% 資訊儀表板, 右70% 執行區)
             left_col, right_col = st.columns([3, 7], gap="large")
 
             # ----------------------------------------------------
-            # 👈 左側欄 (準備區)
+            # 👈 左側欄 (儀表板 & 身體數據)
             # ----------------------------------------------------
             with left_col:
-                st.subheader("👤 學生與設定")
-                student_key = st.selectbox("選擇學生", list(students_dict.keys()))
-                student_data = students_dict.get(student_key, {})
-                
-                try:
-                    cmj_static_base = float(student_data.get("cmj_static", 0))
-                except (ValueError, TypeError):
-                    cmj_static_base = 0.0
-                
-                student_memo = student_data.get("memo", "")
+                # 1. 學生大標題
+                st.markdown(f"<h1 style='margin-bottom: 0px;'>👤 {student_key.split('(')[0]}</h1>", unsafe_allow_html=True)
+                st.caption(f"ID: {student_key.split('(')[1][:-1]}")
+                st.write("")
 
-                # Session State 初始化
-                if 'last_student_key' not in st.session_state:
-                    st.session_state['last_student_key'] = student_key
-                if st.session_state['last_student_key'] != student_key:
-                    st.session_state['cmj_input'] = None
-                    st.session_state['saved_signatures'] = set() # 切換學生時清空存檔記憶
-                    st.session_state['last_student_key'] = student_key
-                
-                if 'saved_signatures' not in st.session_state:
-                    st.session_state['saved_signatures'] = set()
-
-                if 'cmj_input' not in st.session_state:
-                    st.session_state['cmj_input'] = None
-
-                selected_date = st.date_input("訓練日期", value=datetime.now())
-                record_date_str = selected_date.strftime("%Y-%m-%d")
-
-                st.write("") 
-
-                # --- 📝 教練備忘錄 ---
-                with st.expander("📝 教練備忘 (Memo)", expanded=True):
-                    new_memo = st.text_area("注意事項", value=student_memo, height=100, label_visibility="collapsed")
-                    if st.button("💾 更新備註"):
-                        try:
-                            fresh_sheet = client.open("Coach_System_DB")
-                            ws_students_fresh = fresh_sheet.worksheet("Students")
-                            sid = student_key.split('(')[1].strip(')')
-                            cell = ws_students_fresh.find(sid)
-                            if cell:
-                                headers = ws_students_fresh.row_values(1)
-                                if "Memo" in headers:
-                                    memo_col_idx = headers.index("Memo") + 1
-                                    ws_students_fresh.update_cell(cell.row, memo_col_idx, new_memo)
-                                    st.toast("✅ 備註已更新！")
-                                    st.cache_data.clear()
-                                    time.sleep(1)
-                                    st.rerun()
-                        except Exception as e:
-                            st.error(f"更新失敗: {e}")
-
-                # --- 🔍 檢查本日 InBody 狀態 ---
-                inbody_status = "⚖️ 身體數值"
-                inbody_msg = ""
-                inbody_done = False
-                
-                if not df_body_comp.empty:
-                    # 篩選這位學生、今天的資料
-                    today_bc = df_body_comp[
-                        (df_body_comp["StudentID"] == student_key) & 
-                        (df_body_comp["Date"] == record_date_str)
-                    ]
-                    if not today_bc.empty:
-                        last_rec = today_bc.iloc[-1]
-                        inbody_status = "✅ 身體數值 (本日已紀錄)"
-                        inbody_msg = f"已存：體重 {last_rec['Weight']}kg / 體脂 {last_rec['BodyFat']}%"
-                        inbody_done = True
-
-                # --- ⚖️ 身體組成 UI ---
-                with st.expander(inbody_status, expanded=False):
-                    if inbody_done:
-                        st.success(inbody_msg)
-                    
-                    last_weight = 0
-                    # 抓取「上一次」體重 (不含今天，為了計算變化)
-                    if not df_body_comp.empty:
-                         stu_bc_hist = df_body_comp[
-                             (df_body_comp["StudentID"] == student_key) & 
-                             (df_body_comp["Date"] < record_date_str)
-                         ].sort_values("Date")
-                         if not stu_bc_hist.empty:
-                             last_weight = float(stu_bc_hist.iloc[-1]["Weight"])
-
-                    in_weight = st.number_input("體重 (kg)", step=0.1, value=None, placeholder="請輸入體重...")
-                    
-                    if last_weight > 0 and in_weight is not None:
-                        delta_w = in_weight - last_weight
-                        st.metric("體重變化", f"{in_weight} kg", f"{delta_w:.1f} kg", delta_color="inverse")
-                    
-                    in_fat = st.number_input("體脂率 (%)", step=0.1, value=None)
-                    in_muscle = st.number_input("骨骼肌 (kg)", step=0.1, value=None)
-                    in_note = st.text_input("測量備註")
-                    
-                    if st.button("✅ 存入數值"):
-                        save_weight = in_weight if in_weight is not None else 0
-                        save_fat = in_fat if in_fat is not None else 0
-                        save_muscle = in_muscle if in_muscle is not None else 0
-                        
-                        if ws_body_comp:
-                            ws_body_comp.append_rows([[record_date_str, student_key, save_weight, save_fat, save_muscle, in_note]])
-                            st.toast("✅ 身體數值已儲存！")
-                            st.cache_data.clear() # 清除快取以更新狀態
-                            time.sleep(1)
-                            st.rerun()
-
-                st.write("") 
-
-                # --- 🔍 檢查本日暖身狀態 ---
-                warmup_title = "🔥 暖身環節"
-                if not df_warmup_history.empty:
-                    today_warmup = df_warmup_history[
-                        (df_warmup_history["StudentID"] == student_key) & 
-                        (df_warmup_history["Date"] == record_date_str)
-                    ]
-                    if not today_warmup.empty:
-                        # 取出他做了什麼模組
-                        mod_name = today_warmup.iloc[0]["ModuleName"]
-                        warmup_title = f"🔥 暖身環節 (✅ 已完成: {mod_name})"
-
-                # --- 🔥 暖身系統 UI ---
-                st.markdown(f"""
-                    <div style="background-color: #FFF5F5; padding: 10px; border-radius: 10px; border: 1px solid #FFEEEE;">
-                    <h3 style="margin: 0; color: #333; font-size: 1.2rem;">{warmup_title}</h3>
-                """, unsafe_allow_html=True)
-
-                warmup_options = ["(自定義 / 空白)"]
-                if not df_warmup_modules.empty and "Module_Name" in df_warmup_modules.columns:
-                    warmup_options += df_warmup_modules["Module_Name"].unique().tolist()
-                
-                selected_warmup = st.selectbox("選擇模組", warmup_options)
-
-                warmup_state_key = (student_key, selected_warmup)
-                if 'last_warmup_selection' not in st.session_state or st.session_state['last_warmup_selection'] != warmup_state_key:
-                    st.session_state['last_warmup_selection'] = warmup_state_key
-                    if selected_warmup != "(自定義 / 空白)" and not df_warmup_modules.empty and "Module_Name" in df_warmup_modules.columns:
-                        df_w_view = df_warmup_modules[df_warmup_modules["Module_Name"] == selected_warmup].copy()
-                        display_rows = []
-                        for _, row in df_w_view.iterrows():
-                            display_rows.append({
-                                "動作名稱": str(row.get("Exercise", "")),
-                                "組數": int(row.get("Sets", 1)) if str(row.get("Sets", "1")).isdigit() else 1,
-                                "次數/時間": str(row.get("Reps", "")), 
-                                "備註": str(row.get("Note", ""))
-                            })
-                        st.session_state['warmup_df'] = pd.DataFrame(display_rows)
-                    else:
-                        st.session_state['warmup_df'] = pd.DataFrame([{"動作名稱": "", "組數": 1, "次數/時間": "", "備註": ""} for _ in range(3)])
-
-                with st.expander("🛠️ 修改暖身表"):
-                    if exercise_db:
-                        w_cat = st.selectbox("分類", list(exercise_db.keys()), key="w_cat")
-                        w_ex = st.selectbox("動作", exercise_db.get(w_cat, []), key="w_ex")
-                        c_w1, c_w2 = st.columns(2)
-                        with c_w1:
-                             if st.button("➕ 新增"):
-                                w_df = st.session_state['warmup_df']
-                                new_w_row = {"動作名稱": w_ex, "組數": 1, "次數/時間": "10", "備註": "新增"}
-                                st.session_state['warmup_df'] = pd.concat([w_df, pd.DataFrame([new_w_row])], ignore_index=True)
-                                st.rerun()
-                        with c_w2:
-                             if st.button("🔄 替換首項"):
-                                w_df = st.session_state['warmup_df']
-                                if not w_df.empty:
-                                    w_df.at[0, "動作名稱"] = w_ex
-                                    st.session_state['warmup_df'] = w_df
-                                    st.rerun()
-
-                edited_warmup_df = st.data_editor(st.session_state['warmup_df'], hide_index=True, use_container_width=True, num_rows="dynamic")
-
-                if st.button("✅ 紀錄暖身", type="secondary", use_container_width=True):
-                    valid_warmup_records = []
-                    for _, row in edited_warmup_df.iterrows():
-                        if row["動作名稱"] and str(row["動作名稱"]).strip() != "":
-                            valid_warmup_records.append([record_date_str, student_key, selected_warmup, row["動作名稱"], row["組數"], row["次數/時間"], row["備註"]])
-                    if valid_warmup_records:
-                        if ws_warmup_hist:
-                            ws_warmup_hist.append_rows(valid_warmup_records)
-                            st.toast("✅ 暖身已紀錄！", icon="🔥")
-                            st.cache_data.clear() # 更新狀態
-                            time.sleep(1)
-                            st.rerun()
-                    else:
-                        st.warning("表格為空")
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            # ----------------------------------------------------
-            # 👉 右側欄 (訓練區)
-            # ----------------------------------------------------
-            with right_col:
-                # --- 1. 頂部儀表板 ---
-                st.subheader("📊 訓練概況")
-                m1, m2, m3 = st.columns(3)
-                
+                # 2. 上次訓練資訊
                 last_date_str = "無紀錄"
                 days_gap_str = "-"
                 last_plan_str = "新學生"
@@ -409,83 +255,254 @@ if client:
                         days_gap_str = f"{delta_days} 天前"
                         last_plan_str = f"{last_rec['PlanName']} ({last_rec['Day']})"
 
-                m1.metric("上次訓練", last_date_str, days_gap_str, delta_color="inverse")
-                
-                with m2:
-                    st.caption("上次課表")
-                    st.markdown(f"**{last_plan_str}**")
-                
-                # 智慧狀態判斷
+                st.markdown(f"**📅 上次訓練:** {last_date_str} ({days_gap_str})")
+                st.caption("上次課表:")
+                st.markdown(f"> {last_plan_str}")
+                st.divider()
+
+                # 3. 學員狀態 (CMJ)
                 current_cmj = st.session_state.get('cmj_input') 
                 safe_cmj = current_cmj if current_cmj is not None else 0.0
                 
                 status_label = "⏳ 等待測量"
-                status_val = "-"
-                status_delta = None
                 status_color = "off"
+                status_delta = None
 
                 if safe_cmj > 0 and cmj_static_base > 0:
                     ratio = safe_cmj / cmj_static_base
                     diff = safe_cmj - cmj_static_base
-                    status_val = f"{safe_cmj} cm"
                     if ratio >= 0.95:
                         status_label = "🚀 狀態極佳"
-                        status_delta = f"+{diff:.1f} cm"
                         status_color = "normal"
+                        status_delta = f"+{diff:.1f}"
                     elif ratio >= 0.90:
                         status_label = "⚖️ 狀態普通"
-                        status_delta = f"{diff:.1f} cm"
                         status_color = "off"
+                        status_delta = f"{diff:.1f}"
                     else:
                         status_label = "🛑 疲勞警示"
-                        status_delta = f"{diff:.1f} cm"
                         status_color = "inverse"
+                        status_delta = f"{diff:.1f}"
 
-                m3.metric("學員狀態", status_label, status_delta, delta_color=status_color)
+                st.metric("學員狀態 (CMJ)", status_label, status_delta, delta_color=status_color)
+                st.write("")
 
-                # --- 2. CMJ 檢測 ---
-                with st.container():
-                    st.caption("🐇 賽前/訓前 CMJ 狀態檢測")
-                    c_cmj1, c_cmj2, c_cmj3 = st.columns([2, 2, 2])
-                    baseline_val = cmj_static_base
-                    with c_cmj1:
-                        today_cmj = st.number_input("CMJ (cm)", step=0.5, label_visibility="collapsed", key="cmj_input", value=None, placeholder="輸入 CMJ...")
-                    with c_cmj2:
-                        if baseline_val > 0:
-                            st.caption(f"基準: {baseline_val} cm")
-                    with c_cmj3:
-                         if st.button("紀錄 CMJ", use_container_width=True):
-                            if today_cmj is not None and today_cmj > 0:
-                                ws_history.append_rows([[record_date_str, student_key, "CMJ_Check", "Day_0", "Countermovement Jump", 0, today_cmj, f"Base:{baseline_val:.1f}"]])
-                                st.toast("✅ CMJ 已存檔！")
-                            else:
-                                st.warning("請輸入數值")
+                # 4. 教練備忘 (Memo)
+                with st.expander("📝 教練備忘 (Memo)", expanded=True):
+                    new_memo = st.text_area("注意事項", value=student_memo, height=150, label_visibility="collapsed")
+                    if st.button("💾 更新備註"):
+                        try:
+                            fresh_sheet = client.open("Coach_System_DB")
+                            ws_fresh = fresh_sheet.worksheet("Students")
+                            sid = student_key.split('(')[1].strip(')')
+                            cell = ws_fresh.find(sid)
+                            if cell:
+                                headers = ws_fresh.row_values(1)
+                                if "Memo" in headers:
+                                    memo_col_idx = headers.index("Memo") + 1
+                                    ws_fresh.update_cell(cell.row, memo_col_idx, new_memo)
+                                    st.toast("✅ 備註已更新！")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                        except Exception as e:
+                            st.error(f"更新失敗: {e}")
 
-                st.write("") 
+                st.write("")
 
-                # --- 3. 主訓練課表 ---
-                # 🔍 檢查本日主訓練存檔進度
-                saved_status_text = ""
+                # 5. InBody 身體數值
+                inbody_done = False
+                inbody_btn_label = "💾 存入數值"
+                inbody_btn_type = "secondary"
+                
+                if not df_body_comp.empty:
+                    today_bc = df_body_comp[
+                        (df_body_comp["StudentID"] == student_key) & 
+                        (df_body_comp["Date"] == record_date_str)
+                    ]
+                    if not today_bc.empty:
+                        inbody_done = True
+                        last_rec = today_bc.iloc[-1]
+                        inbody_btn_label = f"✅ 本日已紀錄 ({last_rec['Weight']}kg)"
+                        inbody_btn_type = "primary" # 綠色樣式 (Streamlit primary is usually colored)
+
+                st.markdown("### ⚖️ 身體數值")
+                
+                # 上次體重
+                last_weight = 0
+                if not df_body_comp.empty:
+                     stu_bc_hist = df_body_comp[
+                         (df_body_comp["StudentID"] == student_key) & 
+                         (df_body_comp["Date"] < record_date_str)
+                     ].sort_values("Date")
+                     if not stu_bc_hist.empty:
+                         last_weight = float(stu_bc_hist.iloc[-1]["Weight"])
+
+                in_weight = st.number_input("體重 (kg)", step=0.1, value=None, placeholder="輸入體重...", disabled=inbody_done)
+                if last_weight > 0 and in_weight is not None:
+                    delta_w = in_weight - last_weight
+                    st.caption(f"較上次: {delta_w:+.1f} kg")
+                
+                in_fat = st.number_input("體脂率 (%)", step=0.1, value=None, disabled=inbody_done)
+                in_muscle = st.number_input("骨骼肌 (kg)", step=0.1, value=None, disabled=inbody_done)
+                in_note = st.text_input("測量備註", disabled=inbody_done)
+                
+                if st.button(inbody_btn_label, type=inbody_btn_type, disabled=inbody_done):
+                    save_weight = in_weight if in_weight is not None else 0
+                    save_fat = in_fat if in_fat is not None else 0
+                    save_muscle = in_muscle if in_muscle is not None else 0
+                    
+                    if ws_body_comp:
+                        ws_body_comp.append_rows([[record_date_str, student_key, save_weight, save_fat, save_muscle, in_note]])
+                        st.toast("✅ 身體數值已儲存！")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+
+            # ----------------------------------------------------
+            # 👉 右側欄 (執行區: 暖身 -> CMJ -> 主訓練)
+            # ----------------------------------------------------
+            with right_col:
+                
+                # === 第一區：暖身環節 ===
+                warmup_done = False
+                warmup_btn_label = "✅ 紀錄暖身"
+                warmup_header = "🔥 暖身環節"
+                
+                if not df_warmup_history.empty:
+                    today_warmup = df_warmup_history[
+                        (df_warmup_history["StudentID"] == student_key) & 
+                        (df_warmup_history["Date"] == record_date_str)
+                    ]
+                    if not today_warmup.empty:
+                        warmup_done = True
+                        mod_name = today_warmup.iloc[0]["ModuleName"]
+                        warmup_btn_label = f"✅ 本日已紀錄 ({mod_name})"
+                        warmup_header = f"🔥 暖身環節 (✅ 已完成)"
+
+                st.markdown(f"### {warmup_header}")
+                
+                # 暖身選擇與表格
+                c_w1, c_w2 = st.columns([1, 2])
+                with c_w1:
+                    warmup_options = ["(自定義 / 空白)"]
+                    if not df_warmup_modules.empty and "Module_Name" in df_warmup_modules.columns:
+                        warmup_options += df_warmup_modules["Module_Name"].unique().tolist()
+                    selected_warmup = st.selectbox("選擇模組", warmup_options, label_visibility="collapsed")
+
+                # 載入暖身模組邏輯
+                warmup_state_key = (student_key, selected_warmup)
+                if 'last_warmup_selection' not in st.session_state or st.session_state['last_warmup_selection'] != warmup_state_key:
+                    st.session_state['last_warmup_selection'] = warmup_state_key
+                    if selected_warmup != "(自定義 / 空白)" and not df_warmup_modules.empty and "Module_Name" in df_warmup_modules.columns:
+                        df_w_view = df_warmup_modules[df_warmup_modules["Module_Name"] == selected_warmup].copy()
+                        display_rows = []
+                        for _, row in df_w_view.iterrows():
+                            display_rows.append({
+                                "動作名稱": str(row.get("Exercise", "")),
+                                "組數": int(row.get("Sets", 1)) if str(row.get("Sets", "1")).isdigit() else 1,
+                                "次數/時間": str(row.get("Reps", "")), 
+                                "備註": str(row.get("Note", ""))
+                            })
+                        st.session_state['warmup_df'] = pd.DataFrame(display_rows)
+                    else:
+                        st.session_state['warmup_df'] = pd.DataFrame([{"動作名稱": "", "組數": 1, "次數/時間": "", "備註": ""} for _ in range(3)])
+
+                with st.expander("🛠️ 修改/增加暖身動作"):
+                    if exercise_db:
+                        w_cat = st.selectbox("分類", list(exercise_db.keys()), key="w_cat")
+                        w_ex = st.selectbox("動作", exercise_db.get(w_cat, []), key="w_ex")
+                        cw_b1, cw_b2 = st.columns(2)
+                        with cw_b1:
+                             if st.button("➕ 新增至末尾"):
+                                w_df = st.session_state['warmup_df']
+                                new_w_row = {"動作名稱": w_ex, "組數": 1, "次數/時間": "10", "備註": "新增"}
+                                st.session_state['warmup_df'] = pd.concat([w_df, pd.DataFrame([new_w_row])], ignore_index=True)
+                                st.rerun()
+                        with cw_b2:
+                             if st.button("🔄 替換第一項"):
+                                w_df = st.session_state['warmup_df']
+                                if not w_df.empty:
+                                    w_df.at[0, "動作名稱"] = w_ex
+                                    st.session_state['warmup_df'] = w_df
+                                    st.rerun()
+
+                edited_warmup_df = st.data_editor(st.session_state['warmup_df'], hide_index=True, use_container_width=True, num_rows="dynamic")
+
+                if st.button(warmup_btn_label, type="primary" if warmup_done else "secondary", disabled=warmup_done, use_container_width=True):
+                    valid_warmup_records = []
+                    for _, row in edited_warmup_df.iterrows():
+                        if row["動作名稱"] and str(row["動作名稱"]).strip() != "":
+                            valid_warmup_records.append([record_date_str, student_key, selected_warmup, row["動作名稱"], row["組數"], row["次數/時間"], row["備註"]])
+                    if valid_warmup_records:
+                        if ws_warmup_hist:
+                            ws_warmup_hist.append_rows(valid_warmup_records)
+                            st.toast("✅ 暖身已紀錄！", icon="🔥")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.warning("表格為空")
+
+                st.write("")
+                st.divider()
+
+                # === 第二區：CMJ 檢測 ===
+                st.markdown("### 🐇 CMJ 檢測")
+                
+                cmj_done = False
+                cmj_btn_label = "紀錄 CMJ"
+                
+                # 檢查本日是否已存 CMJ
+                if not df_history.empty:
+                    today_cmj_rec = df_history[
+                        (df_history["StudentID"] == student_key) & 
+                        (df_history["Date"] == record_date_str) &
+                        (df_history["Exercise"] == "Countermovement Jump")
+                    ]
+                    if not today_cmj_rec.empty:
+                        cmj_done = True
+                        val = today_cmj_rec.iloc[-1]["Reps"] # 這裡借用 Reps 欄位存 CMJ 高度
+                        cmj_btn_label = f"✅ 本日已紀錄 ({val} cm)"
+
+                c_cmj1, c_cmj2, c_cmj3 = st.columns([3, 2, 3])
+                with c_cmj1:
+                    today_cmj = st.number_input("CMJ 高度 (cm)", step=0.5, key="cmj_input", value=None, placeholder="輸入 CMJ...", disabled=cmj_done)
+                with c_cmj2:
+                    if cmj_static_base > 0:
+                        st.caption(f"基準: {cmj_static_base} cm")
+                with c_cmj3:
+                    if st.button(cmj_btn_label, type="primary" if cmj_done else "secondary", disabled=cmj_done, use_container_width=True):
+                        if today_cmj is not None and today_cmj > 0:
+                            ws_history.append_rows([[record_date_str, student_key, "CMJ_Check", "Day_0", "Countermovement Jump", 0, today_cmj, f"Base:{cmj_static_base:.1f}"]])
+                            st.toast("✅ CMJ 已存檔！")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.warning("請輸入數值")
+
+                st.write("")
+                st.divider()
+
+                # === 第三區：主訓練 ===
+                
+                # 統計本日已存檔數
+                saved_count = 0
                 if not df_history.empty:
                     today_workout = df_history[
                         (df_history["StudentID"] == student_key) & 
                         (df_history["Date"] == record_date_str) &
                         (df_history["PlanName"] != "CMJ_Check")
                     ]
-                    if not today_workout.empty:
-                        count = len(today_workout)
-                        last_ex = today_workout.iloc[-1]["Exercise"]
-                        saved_status_text = f"📊 本日已存檔：共 {count} 筆紀錄 (最新: {last_ex})"
-                    else:
-                        saved_status_text = "⚪ 本日尚未有主訓練紀錄"
+                    saved_count = len(today_workout)
 
-                st.markdown(f"""
-                    <div style="background-color: #F0F8FF; padding: 20px; border-radius: 15px; border: 1px solid #E6F3FF;">
-                    <h3 style="margin-top:0;">🏋️‍♂️ 主訓練 (Main Workout)</h3>
-                    <p style="color: #666; font-size: 0.9rem; margin-bottom: 5px;">{saved_status_text}</p>
-                """, unsafe_allow_html=True)
+                st.markdown(f"### 🏋️‍♂️ 主訓練 (Main Workout)")
+                if saved_count > 0:
+                    st.info(f"📊 本日已存檔：共 {saved_count} 筆紀錄")
                 
-                mp1, mp2 = st.columns(2)
+                # 課表選擇
+                mp1, mp2 = st.columns([3, 2])
                 with mp1:
                     available_plans = df_plan["Plan_Name"].unique().tolist() if not df_plan.empty else []
                     plan_name = st.selectbox("選擇計畫", available_plans, label_visibility="collapsed", placeholder="選擇課表...")
@@ -494,8 +511,8 @@ if client:
                     day = st.selectbox("選擇進度", days, label_visibility="collapsed", placeholder="選擇天數...")
 
                 if plan_name and day:
+                    # 載入課表邏輯
                     current_context = (student_key, plan_name, day)
-                    
                     if 'last_context' not in st.session_state or st.session_state['last_context'] != current_context:
                         df_view = df_plan[(df_plan["Plan_Name"] == plan_name) & (df_plan["Day"] == day)].copy()
                         student_rm = students_dict.get(student_key, {}).get("rm", {})
@@ -524,9 +541,9 @@ if client:
                                 })
                         st.session_state['workout_df'] = pd.DataFrame(rows)
                         st.session_state['last_context'] = current_context
-                        # 切換課表時，清除「本次會話」的存檔記憶，避免卡住
-                        # (但真正的防重複是靠「內容比對」)
+                        st.session_state['saved_signatures'] = set() # 切換課表重置防重複
                     
+                    # 主表格 (支援新增刪除)
                     cols = ["編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
 
@@ -534,8 +551,8 @@ if client:
                         st.session_state['workout_df'], 
                         hide_index=True, 
                         use_container_width=True, 
-                        num_rows="dynamic",
-                        key="workout_editor", # 固定 key 防止跳動
+                        num_rows="dynamic", # 保留新增/刪除功能
+                        key="workout_editor", 
                         column_config={
                             "編號": st.column_config.TextColumn(width="small"),
                             "組數": st.column_config.TextColumn(width="small"),
@@ -552,32 +569,42 @@ if client:
                     total_sets = len(edited_df)
                     filled_sets = edited_df[edited_df["實際重量 (kg)"].notna()].shape[0]
                     progress = filled_sets / total_sets if total_sets > 0 else 0
-                    st.progress(progress, text=f"目前進度: {filled_sets}/{total_sets} 組")
+                    st.progress(progress, text=f"目前填寫進度: {filled_sets}/{total_sets} 組")
 
+                    # 歷史快查
+                    current_exercises = edited_df['動作名稱'].unique().tolist()
+                    with st.expander("🔎 歷史數據快查 (Quick Look)", expanded=False):
+                        ql_exercise = st.selectbox("選擇動作:", current_exercises)
+                        if ql_exercise and not df_history.empty:
+                            ql_hist = df_history[(df_history["StudentID"] == student_key) & (df_history["Exercise"] == ql_exercise)].copy()
+                            if not ql_hist.empty:
+                                ql_hist["Date"] = pd.to_datetime(ql_hist["Date"])
+                                ql_show = ql_hist.sort_values("Date", ascending=False).head(5)
+                                ql_show["Date"] = ql_show["Date"].dt.strftime('%Y-%m-%d')
+                                st.dataframe(ql_show[["Date", "Weight", "Reps", "Note"]], hide_index=True, use_container_width=True)
+                            else:
+                                st.caption("尚無紀錄")
+
+                    # 存檔按鈕
                     if st.button("💾 紀錄主訓練", type="primary", use_container_width=True):
                         recs = []
                         new_saved_count = 0
                         
                         for _, row in edited_df.iterrows():
-                            # 取得這格的數據
                             save_w = row["實際重量 (kg)"]
                             save_r = row["實際次數"]
                             
-                            # 檢查是否有填寫 (有重量或有次數)
                             has_data = False
                             if pd.notna(save_w) and float(save_w) > 0: has_data = True
                             if pd.notna(save_r) and float(save_r) > 0: has_data = True
                             
                             if has_data:
-                                # 🔥 智慧防重複 (Smart Save Logic)
-                                # 製作「數位指紋」：包含 學生+日期+動作+組數+重量+次數
-                                # 如果這個指紋已經存過，就代表完全沒變，跳過
+                                # 智慧防重複：檢查指紋
                                 signature = f"{student_key}|{record_date_str}|{row['動作名稱']}|{row['組數']}|{save_w}|{save_r}"
                                 
                                 if signature in st.session_state['saved_signatures']:
-                                    continue # 跳過，不存
+                                    continue # 完全一樣則跳過
                                 
-                                # 如果是新的指紋 (代表是新的，或是修正過的數值)，就存
                                 recs.append([record_date_str, student_key, plan_name, day, row["動作名稱"], save_w, save_r, row["備註"]])
                                 st.session_state['saved_signatures'].add(signature)
                                 new_saved_count += 1
@@ -586,17 +613,14 @@ if client:
                             with st.spinner("存檔中..."):
                                 ws_history.append_rows(recs)
                                 st.toast(f"✅ 成功儲存 {new_saved_count} 筆新紀錄！")
-                                # 這裡強制重整，讓上方的「本日已存檔」數字馬上更新，給使用者安心感
-                                st.cache_data.clear()
+                                st.cache_data.clear() # 更新統計
                                 time.sleep(1)
                                 st.rerun()
                         else:
                             st.info("沒有變更或新的紀錄需要儲存")
-                
-                st.markdown("</div>", unsafe_allow_html=True)
 
         # ==========================================
-        # 🔍 功能 B: 歷史查詢
+        # 🔍 功能 B: 歷史查詢 (維持原樣)
         # ==========================================
         elif app_mode == "歷史查詢 (History)":
             st.header("🔍 歷史紀錄")
