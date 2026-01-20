@@ -6,6 +6,7 @@ from datetime import datetime
 import time
 import altair as alt
 import os
+import re # 🆕 新增這個模組來處理 W1D1 的排序
 
 # --- 1. 設定頁面 (寬版佈局) ---
 st.set_page_config(page_title="RC Sports Performance", layout="wide")
@@ -503,9 +504,45 @@ if client:
                 with mp1:
                     available_plans = df_plan["Plan_Name"].unique().tolist() if not df_plan.empty else []
                     plan_name = st.selectbox("選擇計畫", available_plans, label_visibility="collapsed", placeholder="選擇課表...")
+                
                 with mp2:
-                    days = df_plan[df_plan["Plan_Name"] == plan_name]["Day"].unique().tolist() if plan_name else []
-                    day = st.selectbox("選擇進度", days, label_visibility="collapsed", placeholder="選擇天數...")
+                    # 🚀 [功能 1] 智慧排序：W1D1, W1D2...
+                    raw_days = []
+                    if plan_name:
+                        raw_days = df_plan[df_plan["Plan_Name"] == plan_name]["Day"].unique().tolist()
+                    
+                    def sort_key(d_str):
+                        # 使用正規表達式抓取 W 後面的數字 和 D 後面的數字
+                        m = re.search(r'W(\d+)D(\d+)', str(d_str), re.IGNORECASE)
+                        if m:
+                            return (int(m.group(1)), int(m.group(2)))
+                        return (999, 999) # 如果格式不對，排到最後
+                    
+                    sorted_days = sorted(raw_days, key=sort_key)
+                    
+                    # 🚀 [功能 2] 自動跳轉：查詢歷史紀錄最後一筆
+                    default_idx = 0
+                    if plan_name and not df_history.empty:
+                        # 找出這位學生 + 這個 Plan 的歷史紀錄
+                        past_plan_work = df_history[
+                            (df_history["StudentID"] == student_key) & 
+                            (df_history["PlanName"] == plan_name)
+                        ]
+                        if not past_plan_work.empty:
+                            # 找出最近一次紀錄的 Day
+                            # 這裡假設寫入順序即時間順序 (append_rows)
+                            last_day_record = past_plan_work.iloc[-1]["Day"]
+                            
+                            if last_day_record in sorted_days:
+                                current_idx = sorted_days.index(last_day_record)
+                                # 如果還有下一天，就預選下一天
+                                if current_idx + 1 < len(sorted_days):
+                                    default_idx = current_idx + 1
+                                else:
+                                    # 已經是最後一天，就停在最後一天
+                                    default_idx = current_idx
+
+                    day = st.selectbox("選擇進度", sorted_days, index=default_idx, label_visibility="collapsed", placeholder="選擇天數...")
 
                 if plan_name and day:
                     # 載入課表邏輯
@@ -545,7 +582,7 @@ if client:
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
 
                     # --------------------------------------------------------
-                    # 🛠️ [新增功能] 臨時新增動作區塊 (Insert Here)
+                    # 🛠️ 臨時新增動作區塊 (維持原樣)
                     # --------------------------------------------------------
                     with st.expander("🛠️ 臨時新增/修改動作 (Add Exercise)"):
                         if exercise_db:
