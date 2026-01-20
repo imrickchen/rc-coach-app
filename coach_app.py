@@ -259,9 +259,6 @@ if client:
                 st.caption("上次課表:")
                 st.markdown(f"> {last_plan_str}")
                 
-                # ✅ 移除分隔線
-                # st.divider()
-
                 # 3. 學員狀態 (CMJ)
                 current_cmj = st.session_state.get('cmj_input') 
                 safe_cmj = current_cmj if current_cmj is not None else 0.0
@@ -333,12 +330,12 @@ if client:
                 # 上次體重
                 last_weight = 0
                 if not df_body_comp.empty:
-                     stu_bc_hist = df_body_comp[
-                         (df_body_comp["StudentID"] == student_key) & 
-                         (df_body_comp["Date"] < record_date_str)
-                     ].sort_values("Date")
-                     if not stu_bc_hist.empty:
-                         last_weight = float(stu_bc_hist.iloc[-1]["Weight"])
+                      stu_bc_hist = df_body_comp[
+                          (df_body_comp["StudentID"] == student_key) & 
+                          (df_body_comp["Date"] < record_date_str)
+                      ].sort_values("Date")
+                      if not stu_bc_hist.empty:
+                          last_weight = float(stu_bc_hist.iloc[-1]["Weight"])
 
                 in_weight = st.number_input("體重 (kg)", step=0.1, value=None, placeholder="輸入體重...", disabled=inbody_done)
                 if last_weight > 0 and in_weight is not None:
@@ -447,8 +444,6 @@ if client:
                         st.warning("表格為空")
 
                 st.write("")
-                # ✅ 移除分隔線
-                # st.divider()
 
                 # === 第二區：CMJ 檢測 ===
                 st.markdown("### 🐇 CMJ 檢測")
@@ -486,8 +481,6 @@ if client:
                             st.warning("請輸入數值")
 
                 st.write("")
-                # ✅ 移除分隔線
-                # st.divider()
 
                 # === 第三區：主訓練 ===
                 
@@ -550,6 +543,38 @@ if client:
                     # 主表格 (支援新增刪除)
                     cols = ["編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
+
+                    # --------------------------------------------------------
+                    # 🛠️ [新增功能] 臨時新增動作區塊 (Insert Here)
+                    # --------------------------------------------------------
+                    with st.expander("🛠️ 臨時新增/修改動作 (Add Exercise)"):
+                        if exercise_db:
+                            # 1. 選擇分類與動作
+                            col_add1, col_add2, col_add3 = st.columns([2, 2, 1])
+                            with col_add1:
+                                m_cat = st.selectbox("分類", list(exercise_db.keys()), key="m_cat_main")
+                            with col_add2:
+                                m_ex = st.selectbox("動作", exercise_db.get(m_cat, []), key="m_ex_main")
+                            with col_add3:
+                                st.write("") # 排版用
+                                if st.button("➕ 加入列表", use_container_width=True):
+                                    # 建構新的一行資料
+                                    new_row = {
+                                        "編號": "加",
+                                        "動作名稱": m_ex,
+                                        "組數": "Set 1",
+                                        "計畫次數": 10,
+                                        "強度 (%)": "-",
+                                        "建議重量": 0,
+                                        "實際重量 (kg)": None,
+                                        "實際次數": None,
+                                        "備註": "臨時新增"
+                                    }
+                                    # 寫入 Session State
+                                    current_df = st.session_state['workout_df']
+                                    st.session_state['workout_df'] = pd.concat([current_df, pd.DataFrame([new_row])], ignore_index=True)
+                                    st.rerun()
+                    # --------------------------------------------------------
 
                     edited_df = st.data_editor(
                         st.session_state['workout_df'], 
@@ -695,7 +720,7 @@ if client:
                 search_term = st.text_input("🔎 關鍵字搜尋 (ex: 划船)")
                 df_log_main = df_show[df_show["Exercise"] != "Countermovement Jump"].copy()
                 if search_term:
-                     df_log_main = df_log_main[df_log_main["Exercise"].str.contains(search_term, case=False, na=False)]
+                      df_log_main = df_log_main[df_log_main["Exercise"].str.contains(search_term, case=False, na=False)]
 
                 dates_main = df_log_main['Date'].unique() if not df_log_main.empty else []
                 dates_warm = df_warmup_show['Date'].unique() if not df_warmup_show.empty else []
@@ -724,5 +749,4 @@ if client:
                                     st.dataframe(day_warmup[["ModuleName", "Exercise", "Sets", "Reps", "Note"]], hide_index=True, use_container_width=True)
                             if not day_main_recs.empty:
                                 st.caption("🏋️‍♂️ 主訓練紀錄")
-
                                 st.dataframe(day_main_recs[["Exercise", "Weight", "Reps", "Note"]], hide_index=True, use_container_width=True)
