@@ -6,7 +6,7 @@ from datetime import datetime
 import time
 import altair as alt
 import os
-import re # 🆕 新增這個模組來處理 W1D1 的排序
+import re
 
 # --- 1. 設定頁面 (寬版佈局) ---
 st.set_page_config(page_title="RC Sports Performance", layout="wide")
@@ -175,7 +175,44 @@ if client:
     if students_dict:
         # 2. 學生與日期選擇 (移至側邊欄)
         st.sidebar.subheader("👤 學生與日期")
-        student_key = st.sidebar.selectbox("選擇學生", list(students_dict.keys()))
+        
+        # 學生 Session State 初始化
+        if 'student_key' not in st.session_state:
+            st.session_state['student_key'] = list(students_dict.keys())[0]
+
+        # 監聽學生切換 (解決問題 1：切換人名後自動跳轉)
+        def on_student_change():
+            # 當學生改變時，去歷史紀錄找上次練什麼
+            new_stu = st.session_state['student_key']
+            st.session_state['cmj_input'] = None
+            st.session_state['saved_signatures'] = set()
+            
+            # 搜尋該學生的最後一筆主訓練
+            if not df_history.empty:
+                stu_hist = df_history[
+                    (df_history["StudentID"] == new_stu) & 
+                    (df_history["PlanName"] != "CMJ_Check")
+                ]
+                if not stu_hist.empty:
+                    # 找到最後一次
+                    last_rec = stu_hist.iloc[-1]
+                    last_plan = last_rec["PlanName"]
+                    last_day = last_rec["Day"]
+                    
+                    # 更新 Session State 中的預設值
+                    # 注意：這裡只是存起來，稍後在 Selectbox 設定 index
+                    st.session_state['auto_plan'] = last_plan
+                    st.session_state['auto_day'] = last_day
+                else:
+                    st.session_state['auto_plan'] = None
+                    st.session_state['auto_day'] = None
+
+        student_key = st.sidebar.selectbox(
+            "選擇學生", 
+            list(students_dict.keys()), 
+            key='student_key', 
+            on_change=on_student_change
+        )
         
         # 學生資料讀取
         student_data = students_dict.get(student_key, {})
@@ -184,14 +221,6 @@ if client:
         except:
             cmj_static_base = 0.0
         student_memo = student_data.get("memo", "")
-
-        # Session State 初始化
-        if 'last_student_key' not in st.session_state:
-            st.session_state['last_student_key'] = student_key
-        if st.session_state['last_student_key'] != student_key:
-            st.session_state['cmj_input'] = None
-            st.session_state['saved_signatures'] = set()
-            st.session_state['last_student_key'] = student_key
         
         if 'saved_signatures' not in st.session_state:
             st.session_state['saved_signatures'] = set()
@@ -259,7 +288,7 @@ if client:
                 st.markdown(f"**📅 上次訓練:** {last_date_str} ({days_gap_str})")
                 st.caption("上次課表:")
                 st.markdown(f"> {last_plan_str}")
-                
+
                 # 3. 學員狀態 (CMJ)
                 current_cmj = st.session_state.get('cmj_input') 
                 safe_cmj = current_cmj if current_cmj is not None else 0.0
@@ -499,11 +528,17 @@ if client:
                 if saved_count > 0:
                     st.info(f"📊 本日已存檔：共 {saved_count} 筆紀錄")
                 
-                # 課表選擇
+                # 課表選擇 (處理自動跳轉邏輯)
                 mp1, mp2 = st.columns([3, 2])
                 with mp1:
                     available_plans = df_plan["Plan_Name"].unique().tolist() if not df_plan.empty else []
-                    plan_name = st.selectbox("選擇計畫", available_plans, label_visibility="collapsed", placeholder="選擇課表...")
+                    
+                    # 決定 Plan 的預設 index
+                    plan_idx = 0
+                    if 'auto_plan' in st.session_state and st.session_state['auto_plan'] in available_plans:
+                        plan_idx = available_plans.index(st.session_state['auto_plan'])
+                    
+                    plan_name = st.selectbox("選擇計畫", available_plans, index=plan_idx, label_visibility="collapsed", placeholder="選擇課表...")
                 
                 with mp2:
                     # 🚀 [功能 1] 智慧排序：W1D1, W1D2...
@@ -520,32 +555,27 @@ if client:
                     
                     sorted_days = sorted(raw_days, key=sort_key)
                     
-                    # 🚀 [功能 2] 自動跳轉：查詢歷史紀錄最後一筆
-                    default_idx = 0
-                    if plan_name and not df_history.empty:
-                        # 找出這位學生 + 這個 Plan 的歷史紀錄
-                        past_plan_work = df_history[
-                            (df_history["StudentID"] == student_key) & 
-                            (df_history["PlanName"] == plan_name)
-                        ]
-                        if not past_plan_work.empty:
-                            # 找出最近一次紀錄的 Day
-                            # 這裡假設寫入順序即時間順序 (append_rows)
-                            last_day_record = past_plan_work.iloc[-1]["Day"]
-                            
-                            if last_day_record in sorted_days:
-                                current_idx = sorted_days.index(last_day_record)
-                                # 如果還有下一天，就預選下一天
-                                if current_idx + 1 < len(sorted_days):
-                                    default_idx = current_idx + 1
-                                else:
-                                    # 已經是最後一天，就停在最後一天
-                                    default_idx = current_idx
-
-                    day = st.selectbox("選擇進度", sorted_days, index=default_idx, label_visibility="collapsed", placeholder="選擇天數...")
+                    # 🚀 [功能 2] 自動跳轉：判斷 Index
+                    day_idx = 0
+                    
+                    # 如果是因為「切換人名」而觸發的自動選取
+                    if 'auto_day' in st.session_state and st.session_state['auto_day']:
+                        # 找找看上次的 Day 是哪一個
+                        last_day = st.session_state['auto_day']
+                        if last_day in sorted_days:
+                            current_found_idx = sorted_days.index(last_day)
+                            # 自動跳下一個
+                            if current_found_idx + 1 < len(sorted_days):
+                                day_idx = current_found_idx + 1
+                            else:
+                                day_idx = current_found_idx
+                        # 使用完畢後清除，避免切換 Plan 時一直被鎖住
+                        st.session_state['auto_day'] = None 
+                    
+                    day = st.selectbox("選擇進度", sorted_days, index=day_idx, label_visibility="collapsed", placeholder="選擇天數...")
 
                 if plan_name and day:
-                    # 載入課表邏輯
+                    # 載入課表邏輯 (僅在 Context 改變時讀取)
                     current_context = (student_key, plan_name, day)
                     if 'last_context' not in st.session_state or st.session_state['last_context'] != current_context:
                         df_view = df_plan[(df_plan["Plan_Name"] == plan_name) & (df_plan["Day"] == day)].copy()
@@ -566,6 +596,7 @@ if client:
 
                             for s in range(1, int(row["Sets"]) + 1):
                                 rows.append({
+                                    "選取": False, # 🆕 新增選取欄位
                                     "編號": str(row["Order"]), "動作名稱": row["Exercise"], "組數": f"Set {s}",
                                     "計畫次數": row["Reps"], "強度 (%)": fmt_int,
                                     "建議重量": w, 
@@ -578,25 +609,33 @@ if client:
                         st.session_state['saved_signatures'] = set() # 切換課表重置防重複
                     
                     # 主表格 (支援新增刪除)
-                    cols = ["編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
+                    # 必須確保欄位順序
+                    cols = ["選取", "編號", "動作名稱", "組數", "計畫次數", "強度 (%)", "建議重量", "實際重量 (kg)", "實際次數", "備註"]
+                    if "選取" not in st.session_state['workout_df'].columns:
+                        st.session_state['workout_df']["選取"] = False
                     st.session_state['workout_df'] = st.session_state['workout_df'][cols]
 
                     # --------------------------------------------------------
-                    # 🛠️ 臨時新增動作區塊 (維持原樣)
+                    # 🛠️ 臨時新增/修改動作區塊 (解決問題 2 & 3)
                     # --------------------------------------------------------
-                    with st.expander("🛠️ 臨時新增/修改動作 (Add Exercise)"):
+                    with st.expander("🛠️ 臨時新增/修改動作 (Modify Exercise)"):
                         if exercise_db:
                             # 1. 選擇分類與動作
-                            col_add1, col_add2, col_add3 = st.columns([2, 2, 1])
+                            col_add1, col_add2, col_add3 = st.columns([2, 2, 2])
                             with col_add1:
                                 m_cat = st.selectbox("分類", list(exercise_db.keys()), key="m_cat_main")
                             with col_add2:
                                 m_ex = st.selectbox("動作", exercise_db.get(m_cat, []), key="m_ex_main")
+                            
                             with col_add3:
                                 st.write("") # 排版用
-                                if st.button("➕ 加入列表", use_container_width=True):
-                                    # 建構新的一行資料
+                                # 🟢 按鈕 1: 加入列表
+                                if st.button("➕ 加入列表 (Add)", use_container_width=True):
+                                    # ⚠️ 關鍵修正：先從 Editor 取得最新狀態，防止資料被覆蓋
+                                    current_df = pd.DataFrame(st.session_state['workout_editor'])
+                                    
                                     new_row = {
+                                        "選取": False,
                                         "編號": "加",
                                         "動作名稱": m_ex,
                                         "組數": "Set 1",
@@ -607,10 +646,26 @@ if client:
                                         "實際次數": None,
                                         "備註": "臨時新增"
                                     }
-                                    # 寫入 Session State
-                                    current_df = st.session_state['workout_df']
                                     st.session_state['workout_df'] = pd.concat([current_df, pd.DataFrame([new_row])], ignore_index=True)
                                     st.rerun()
+
+                                # 🔵 按鈕 2: 替換選取
+                                if st.button("🔄 替換選取列 (Replace)", use_container_width=True):
+                                    # ⚠️ 關鍵修正：先從 Editor 取得最新狀態
+                                    current_df = pd.DataFrame(st.session_state['workout_editor'])
+                                    
+                                    # 檢查有沒有勾選
+                                    if "選取" in current_df.columns and current_df["選取"].any():
+                                        # 將勾選的那一列的動作名稱換掉
+                                        current_df.loc[current_df["選取"] == True, "動作名稱"] = m_ex
+                                        # 替換完後把勾選取消
+                                        current_df.loc[current_df["選取"] == True, "選取"] = False
+                                        # 寫回 Session State
+                                        st.session_state['workout_df'] = current_df
+                                        st.rerun()
+                                    else:
+                                        st.toast("⚠️ 請先在下方表格勾選要修改的項目")
+
                     # --------------------------------------------------------
 
                     edited_df = st.data_editor(
@@ -618,8 +673,9 @@ if client:
                         hide_index=True, 
                         use_container_width=True, 
                         num_rows="dynamic", # 保留新增/刪除功能
-                        key="workout_editor", 
+                        key="workout_editor",  # ⚠️ 綁定 key 以便按鈕能讀取最新狀態
                         column_config={
+                            "選取": st.column_config.CheckboxColumn("✅", width="small"),
                             "編號": st.column_config.TextColumn(width="small"),
                             "組數": st.column_config.TextColumn(width="small"),
                             "計畫次數": st.column_config.NumberColumn("次數", width="small"),
