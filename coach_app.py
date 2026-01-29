@@ -176,10 +176,18 @@ if not client:
         st.rerun()
     st.stop()
 
-students_dict, df_plan, exercise_db, df_warmup_modules, key_lifts = load_static_data()
-ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp = get_history_worksheets()
+# 增加讀取提示
+with st.spinner("正在讀取資料庫..."):
+    students_dict, df_plan, exercise_db, df_warmup_modules, key_lifts = load_static_data()
+    ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp = get_history_worksheets()
 
+# ==========================================
+# 🛡️ V4.1 關鍵修正：確保讀取失敗時不會白畫面
+# ==========================================
 if students_dict:
+    # ------------------------------------
+    # 正常的 UI 渲染區塊
+    # ------------------------------------
     st.sidebar.subheader("👤 學生與日期")
     
     if 'student_key' not in st.session_state:
@@ -191,7 +199,6 @@ if students_dict:
         st.session_state['cmj_input'] = None
         st.session_state['saved_signatures'] = set()
         
-        # 搜尋該學生的最後一筆主訓練 (自動跳轉邏輯)
         if not df_history.empty:
             stu_hist = df_history[
                 (df_history["StudentID"] == new_stu) & 
@@ -321,12 +328,8 @@ if students_dict:
                         ws_fresh = fresh_sheet.worksheet("Students")
                         sid = student_key.split('(')[1].strip(')')
                         
-                        # 🔴 [FIXED] 修正 find() 可能誤抓 partial match 的問題
-                        # 改用 findall 找出所有匹配，並檢查是否在正確的欄位 (例如 StudentID 通常在第 2 欄)
-                        # 這裡採用更穩健的方法：取得所有 StudentID，在 Python 端匹配
-                        all_ids = ws_fresh.col_values(2) # 假設 ID 在第二欄
+                        all_ids = ws_fresh.col_values(2)
                         try:
-                            # 找出 row index (gspread 是 1-based, list 是 0-based)
                             row_idx = all_ids.index(sid) + 1 
                             headers = ws_fresh.row_values(1)
                             if "Memo" in headers:
@@ -618,24 +621,7 @@ if students_dict:
                         with col_add3:
                             st.write("") 
                             if st.button("➕ 加入列表 (Add)", use_container_width=True):
-                                # 🔴 [FIXED] 防呆讀取 Session，使用 .get() 加上預設值，避免 KeyError
-                                current_editor_data = st.session_state.get('workout_editor', {})
-                                # 嘗試解析 st.data_editor 的回傳格式 (可能是 dict 包含 changes，或 dataframe，視版本而定)
-                                # 在這裡，為了穩健，我們優先信任 st.session_state['workout_df'] 作為基底，
-                                # 但更理想的是我們直接操作 Dataframe。
-                                # 簡單解法：st.session_state['workout_editor'] 在某些版本直接是 DataFrame。
-                                # 如果是 dict (Streamlit >= 1.23)，代表是 changes。
-                                # 為了相容性，我們這裡做一個保守處理：讀取 key，如果失敗或格式不對，就讀取 'workout_df'
-                                try:
-                                    # 嘗試從 editor key 獲取最新狀態 (如果 Streamlit 版本支援 data_editor state 直接為 DF)
-                                    # 但大部分新版 st.data_editor 的 key 存的是 state dict (edited_rows, added_rows...)
-                                    # 所以我們這裡最安全的做法是：直接對 workout_df 做操作。
-                                    # 缺點：如果使用者只打字沒按 Enter，資料可能沒進去。
-                                    # 但這是 Streamlit 的限制。
-                                    current_df = st.session_state['workout_df'].copy()
-                                except:
-                                    current_df = pd.DataFrame()
-
+                                current_df = st.session_state.get('workout_df', pd.DataFrame())
                                 new_row = {
                                     "選取": False,
                                     "編號": "加",
@@ -652,11 +638,6 @@ if students_dict:
                                 st.rerun()
 
                             if st.button("🔄 替換選取列 (Replace)", use_container_width=True):
-                                # 🔴 [FIXED] 同樣使用 .get() 風格的防爆邏輯
-                                # 實際上 data_editor 的回傳值 (edited_df) 在這裡拿不到，必須依賴 session_state
-                                # 這裡我們假設使用者有勾選，這意味著該勾選狀態已經存入 'workout_editor' 的 changes 中
-                                # 或更簡單：直接操作 'workout_df' (前提是 Checkbox 有被 commit)
-                                # 這裡做一個權衡：只操作 st.session_state['workout_df']
                                 current_df = st.session_state.get('workout_df', pd.DataFrame())
                                 if not current_df.empty and "選取" in current_df.columns:
                                     if current_df["選取"].any():
@@ -669,7 +650,6 @@ if students_dict:
                                 else:
                                     st.warning("表格為空或未初始化")
 
-                # 這裡的 edited_df 是畫面渲染的結果，也是資料的最新狀態
                 edited_df = st.data_editor(
                     st.session_state['workout_df'], 
                     hide_index=True, 
@@ -686,18 +666,9 @@ if students_dict:
                         "實際重量 (kg)": st.column_config.NumberColumn("實際 kg", min_value=0, max_value=500, step=0.5, width="small"), 
                         "實際次數": st.column_config.NumberColumn("實作次數", min_value=0, max_value=100, step=1, width="small"),
                         "備註": st.column_config.TextColumn(width="medium")
-                    },
-                    # 關鍵：當編輯發生時，更新 session_state 中的 workout_df
-                    # 這樣按鈕按下去時，讀取 workout_df 才是最新的
-                    on_change=lambda: st.session_state.update({'workout_df': st.session_state['workout_editor']}) 
-                    # 注意：上行 lambda 僅適用於 data_editor key 返回 DF 的版本。
-                    # 如果報錯，刪除 on_change，但需接受按鈕可能讀不到未 Enter 的資料。
-                    # 為了最穩定的 V4.0，我們暫時拿掉 on_change，改由單向資料流控制，
-                    # 但在上面的按鈕邏輯中，我們已經加強了 .get()。
+                    }
                 )
                 
-                # 同步回 session state (手動同步，確保下次 rerun 資料還在)
-                # 這是解決 "輸入太多數字...畫面跳掉...前面輸入的東西都不見了" 的核心
                 st.session_state['workout_df'] = edited_df
 
                 total_sets = len(edited_df)
@@ -725,9 +696,6 @@ if students_dict:
                         recs = []
                         new_saved_count = 0
                         
-                        # 🟡 [FIXED] 後端雙重防重複檢查 (Backend Deduplication)
-                        # 建立當前 DB 的指紋集合 (日期|學生|動作|組數)
-                        # 為了效能，我們只比對「當天」的資料
                         existing_keys = set()
                         if not df_history.empty:
                             today_records = df_history[
@@ -735,10 +703,6 @@ if students_dict:
                                 (df_history["StudentID"] == student_key)
                             ]
                             for _, r in today_records.iterrows():
-                                # 建立唯一鍵：動作 + 組數 (例如 "深蹲|Set 1")
-                                k = f"{r['Exercise']}|{r['Set']}" # 假設 History 有 Set 欄位，若無則改用 Exercise|Weight|Reps
-                                # V3.1 的寫入格式是 [Date, ID, Plan, Day, Exercise, Weight, Reps, Note]
-                                # 這裡我們比較寬鬆，檢查 "Exercise" + "Weight" + "Reps" 
                                 k_strict = f"{r['Exercise']}|{r['Weight']}|{r['Reps']}"
                                 existing_keys.add(k_strict)
 
@@ -751,17 +715,13 @@ if students_dict:
                             if pd.notna(save_r) and float(save_r) > 0: has_data = True
                             
                             if has_data:
-                                # 1. 前端 Session 指紋檢查 (快速)
                                 signature = f"{student_key}|{record_date_str}|{row['動作名稱']}|{row['組數']}|{save_w}|{save_r}"
                                 if signature in st.session_state['saved_signatures']:
                                     continue
                                 
-                                # 2. 後端資料比對 (安全)
-                                # 檢查這筆資料是否已經在 DB 裡了 (防止重新整理後的重複提交)
                                 db_signature = f"{row['動作名稱']}|{save_w}|{save_r}"
                                 if db_signature in existing_keys:
-                                    # 雖然 Session 沒紀錄，但 DB 已經有了 -> 跳過
-                                    st.session_state['saved_signatures'].add(signature) # 補上 Session 紀錄
+                                    st.session_state['saved_signatures'].add(signature)
                                     continue
 
                                 recs.append([record_date_str, student_key, plan_name, day, row["動作名稱"], save_w, save_r, row["備註"]])
@@ -884,3 +844,13 @@ if students_dict:
                         if not day_main_recs.empty:
                             st.caption("🏋️‍♂️ 主訓練紀錄")
                             st.dataframe(day_main_recs[["Exercise", "Weight", "Reps", "Note"]], hide_index=True, use_container_width=True)
+
+# ==========================================
+# 🚨 關鍵救援：如果讀不到資料，顯示重試畫面
+# ==========================================
+else:
+    st.error("⚠️ 無法讀取學生資料 (Data Load Failed)")
+    st.info("可能是網路連線不穩，導致資料讀取失敗。")
+    if st.button("🔄 重試連線 (Retry)"):
+        st.cache_data.clear()
+        st.rerun()
