@@ -12,20 +12,21 @@ import re
 st.set_page_config(page_title="RC Sports Performance", layout="wide")
 
 # ==========================================
-# 🛠️ 核心：狀態初始化 (解決跳動問題的關鍵)
+# 🛠️ 狀態初始化
 # ==========================================
-if 'student_index' not in st.session_state:
-    st.session_state['student_index'] = 0
-if 'plan_index' not in st.session_state:
-    st.session_state['plan_index'] = 0
-if 'day_index' not in st.session_state:
-    st.session_state['day_index'] = 0
 if 'workout_df' not in st.session_state:
     st.session_state['workout_df'] = pd.DataFrame()
 if 'saved_signatures' not in st.session_state:
     st.session_state['saved_signatures'] = set()
 if 'warmup_df' not in st.session_state:
     st.session_state['warmup_df'] = pd.DataFrame()
+# 初始化選單狀態，給予預設值 (如果還沒選過)
+if 'selected_student' not in st.session_state:
+    st.session_state['selected_student'] = None
+if 'selected_plan' not in st.session_state:
+    st.session_state['selected_plan'] = None
+if 'selected_day' not in st.session_state:
+    st.session_state['selected_day'] = None
 
 # ==========================================
 # 🛠️ 側邊欄與連線
@@ -132,7 +133,6 @@ def get_history_worksheets():
         return ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp
     except: return None, None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# 連線檢查
 client = get_google_sheet_client()
 if not client:
     st.error("⚠️ 無法連接至 Google 雲端資料庫，請重整頁面。")
@@ -142,54 +142,27 @@ students_dict, df_plan, exercise_db, df_warmup_modules, key_lifts = load_static_
 ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp = get_history_worksheets()
 
 if students_dict:
-    # --- 邏輯修正：當學生改變時，才去重設 Plan/Day，平常打字不准動 ---
+    # 學生選單 callback：只清空資料表，不負責跳轉
     def on_student_change():
         st.session_state['workout_df'] = pd.DataFrame()
         st.session_state['saved_signatures'] = set()
         st.session_state['cmj_input'] = None
-        
-        # 自動跳轉邏輯
-        new_stu_key = st.session_state['selected_student_key']
-        if not df_history.empty:
-            stu_hist = df_history[(df_history["StudentID"] == new_stu_key) & (df_history["PlanName"] != "CMJ_Check")]
-            if not stu_hist.empty:
-                last_rec = stu_hist.iloc[-1]
-                last_plan = last_rec["PlanName"]
-                last_day = last_rec["Day"]
-                
-                available_plans = df_plan["Plan_Name"].unique().tolist()
-                if last_plan in available_plans:
-                    st.session_state['plan_index'] = available_plans.index(last_plan)
-                    
-                    raw_days = df_plan[df_plan["Plan_Name"] == last_plan]["Day"].unique().tolist()
-                    def sort_key(d_str):
-                        m = re.search(r'W(\d+)D(\d+)', str(d_str), re.IGNORECASE)
-                        return (int(m.group(1)), int(m.group(2))) if m else (999, 999)
-                    sorted_days = sorted(raw_days, key=sort_key)
-                    
-                    if last_day in sorted_days:
-                        idx = sorted_days.index(last_day)
-                        st.session_state['day_index'] = idx + 1 if idx + 1 < len(sorted_days) else idx
-                else:
-                    st.session_state['plan_index'] = 0
-                    st.session_state['day_index'] = 0
-            else:
-                st.session_state['plan_index'] = 0
-                st.session_state['day_index'] = 0
 
     st.sidebar.subheader("👤 學生與日期")
     student_list = list(students_dict.keys())
-    if st.session_state['student_index'] >= len(student_list): st.session_state['student_index'] = 0
+    
+    # 初始化選單預設值
+    if st.session_state['selected_student'] not in student_list:
+        st.session_state['selected_student'] = student_list[0]
 
+    # 綁定 key 到 session_state，不再手動控制 index
     student_key = st.sidebar.selectbox(
         "選擇學生", 
         student_list, 
-        index=st.session_state['student_index'],
-        key='selected_student_key',
+        key='selected_student', # Streamlit 會自動維護這個值
         on_change=on_student_change
     )
-    st.session_state['student_index'] = student_list.index(student_key)
-
+    
     student_data = students_dict.get(student_key, {})
     student_memo = student_data.get("memo", "")
     cmj_static_base = float(student_data.get("cmj_static", 0))
@@ -212,9 +185,6 @@ if students_dict:
 
     app_mode = st.sidebar.radio("功能選單", ["今日訓練 (Workout)", "歷史查詢 (History)"])
 
-    # ==========================================
-    # 🏋️‍♂️ 功能 A: 今日訓練
-    # ==========================================
     if app_mode == "今日訓練 (Workout)":
         left_col, right_col = st.columns([3, 7], gap="large")
 
@@ -291,15 +261,25 @@ if students_dict:
             st.markdown("### 🏋️‍♂️ 主訓練")
             
             available_plans = df_plan["Plan_Name"].unique().tolist() if not df_plan.empty else []
-            if st.session_state['plan_index'] >= len(available_plans): st.session_state['plan_index'] = 0
             
+            # --- Plan 選擇區 (極簡化：移除所有手動 index 計算) ---
             c_p1, c_p2 = st.columns([3, 2])
+            
+            # 初始化 Plan 預設值
+            if st.session_state['selected_plan'] not in available_plans:
+                 st.session_state['selected_plan'] = available_plans[0] if available_plans else None
+
+            def on_plan_change():
+                st.session_state['workout_df'] = pd.DataFrame() # 換課表清空
+                st.session_state['selected_day'] = None # 重置天數
+
             with c_p1:
-                def on_plan_change():
-                    st.session_state['plan_index'] = available_plans.index(st.session_state['sel_plan'])
-                    st.session_state['day_index'] = 0 
-                    st.session_state['workout_df'] = pd.DataFrame()
-                plan_name = st.selectbox("選擇計畫", available_plans, index=st.session_state['plan_index'], key='sel_plan', on_change=on_plan_change)
+                plan_name = st.selectbox(
+                    "選擇計畫", 
+                    available_plans, 
+                    key='selected_plan', # 自動綁定
+                    on_change=on_plan_change
+                )
 
             with c_p2:
                 raw_days = df_plan[df_plan["Plan_Name"] == plan_name]["Day"].unique().tolist()
@@ -308,15 +288,22 @@ if students_dict:
                     return (int(m.group(1)), int(m.group(2))) if m else (999, 999)
                 sorted_days = sorted(raw_days, key=sort_key)
                 
-                if st.session_state['day_index'] >= len(sorted_days): st.session_state['day_index'] = 0
-                
+                # 初始化 Day 預設值
+                if st.session_state['selected_day'] not in sorted_days:
+                    st.session_state['selected_day'] = sorted_days[0] if sorted_days else None
+
                 def on_day_change():
-                    st.session_state['day_index'] = sorted_days.index(st.session_state['sel_day'])
-                    st.session_state['workout_df'] = pd.DataFrame() 
+                    st.session_state['workout_df'] = pd.DataFrame() # 換天數清空
 
-                day = st.selectbox("選擇進度", sorted_days, index=st.session_state['day_index'], key='sel_day', on_change=on_day_change)
+                day = st.selectbox(
+                    "選擇進度", 
+                    sorted_days, 
+                    key='selected_day', # 自動綁定
+                    on_change=on_day_change
+                )
 
-            # 只有當 workout_df 為空時，才去讀 DB (這就是鎖定的核心)
+            # --- 數據載入 (鎖定邏輯) ---
+            # 只有當 workout_df 為空時，才讀取 DB
             if st.session_state['workout_df'].empty:
                 df_view = df_plan[(df_plan["Plan_Name"] == plan_name) & (df_plan["Day"] == day)].copy()
                 student_rm = students_dict.get(student_key, {}).get("rm", {})
@@ -385,9 +372,6 @@ if students_dict:
                     time.sleep(1)
                 else: st.info("無新資料或已重複")
 
-    # ==========================================
-    # 🔍 功能 B: 歷史查詢 (完整功能回歸)
-    # ==========================================
     elif app_mode == "歷史查詢 (History)":
         st.header("🔍 歷史紀錄")
         if df_history.empty:
@@ -401,7 +385,6 @@ if students_dict:
             else:
                 df_show = df_history
 
-            # CMJ & 1RM 圖表
             col_h1, col_h2 = st.columns(2)
             with col_h1:
                 st.subheader("🐇 CMJ 分析")
@@ -425,7 +408,6 @@ if students_dict:
                     else: st.caption("無數據")
                 else: st.caption("請至 ExerciseDB 設定 ⭐重點分析")
 
-            # 詳細日誌
             st.divider()
             st.subheader("📅 訓練日誌")
             if not df_show.empty:
@@ -434,3 +416,4 @@ if students_dict:
                     d_recs = df_show[df_show["DateStr"] == d_str]
                     with st.expander(f"{d_str} ({len(d_recs)} 筆)"):
                         st.dataframe(d_recs[["StudentID", "Exercise", "Weight", "Reps", "Note"]], hide_index=True)
+
