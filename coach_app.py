@@ -20,7 +20,6 @@ if 'saved_signatures' not in st.session_state:
     st.session_state['saved_signatures'] = set()
 if 'warmup_df' not in st.session_state:
     st.session_state['warmup_df'] = pd.DataFrame()
-# 初始化選單狀態，給予預設值 (如果還沒選過)
 if 'selected_student' not in st.session_state:
     st.session_state['selected_student'] = None
 if 'selected_plan' not in st.session_state:
@@ -133,6 +132,7 @@ def get_history_worksheets():
         return ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp
     except: return None, None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+# 連線檢查
 client = get_google_sheet_client()
 if not client:
     st.error("⚠️ 無法連接至 Google 雲端資料庫，請重整頁面。")
@@ -142,24 +142,39 @@ students_dict, df_plan, exercise_db, df_warmup_modules, key_lifts = load_static_
 ws_history, ws_warmup_hist, ws_body_comp, df_history, df_warmup_history, df_body_comp = get_history_worksheets()
 
 if students_dict:
-    # 學生選單 callback：只清空資料表，不負責跳轉
+    # 🌟 Callback Functions (狀態鎖定的核心)
     def on_student_change():
-        st.session_state['workout_df'] = pd.DataFrame()
+        st.session_state['workout_df'] = pd.DataFrame() # 換人才清空
         st.session_state['saved_signatures'] = set()
         st.session_state['cmj_input'] = None
 
-    st.sidebar.subheader("👤 學生與日期")
-    student_list = list(students_dict.keys())
-    
-    # 初始化選單預設值
-    if st.session_state['selected_student'] not in student_list:
-        st.session_state['selected_student'] = student_list[0]
+    def on_plan_change():
+        st.session_state['workout_df'] = pd.DataFrame() # 換課表才清空
+        st.session_state['selected_day'] = None 
 
-    # 綁定 key 到 session_state，不再手動控制 index
+    def on_day_change():
+        st.session_state['workout_df'] = pd.DataFrame() # 換天數才清空
+
+    # 🌟 關鍵修正：當表格內容改變時，立刻同步到 Session State
+    def on_editor_change():
+        # 這個 callback 會在 Rerun 之前執行，確保資料被保存
+        # 從 editor key 取得最新的 edited dataframe
+        new_state = st.session_state.get('workout_editor')
+        if new_state is not None:
+            st.session_state['workout_df'] = new_state
+
+    # --- 側邊欄 ---
+    st.sidebar.subheader("👤 學生與日期")
+    # 排序學生清單，確保順序穩定
+    student_list = sorted(list(students_dict.keys()))
+    
+    if st.session_state['selected_student'] not in student_list:
+        st.session_state['selected_student'] = student_list[0] if student_list else None
+
     student_key = st.sidebar.selectbox(
         "選擇學生", 
         student_list, 
-        key='selected_student', # Streamlit 會自動維護這個值
+        key='selected_student', 
         on_change=on_student_change
     )
     
@@ -262,22 +277,16 @@ if students_dict:
             
             available_plans = df_plan["Plan_Name"].unique().tolist() if not df_plan.empty else []
             
-            # --- Plan 選擇區 (極簡化：移除所有手動 index 計算) ---
             c_p1, c_p2 = st.columns([3, 2])
             
-            # 初始化 Plan 預設值
             if st.session_state['selected_plan'] not in available_plans:
                  st.session_state['selected_plan'] = available_plans[0] if available_plans else None
-
-            def on_plan_change():
-                st.session_state['workout_df'] = pd.DataFrame() # 換課表清空
-                st.session_state['selected_day'] = None # 重置天數
 
             with c_p1:
                 plan_name = st.selectbox(
                     "選擇計畫", 
                     available_plans, 
-                    key='selected_plan', # 自動綁定
+                    key='selected_plan', 
                     on_change=on_plan_change
                 )
 
@@ -288,22 +297,18 @@ if students_dict:
                     return (int(m.group(1)), int(m.group(2))) if m else (999, 999)
                 sorted_days = sorted(raw_days, key=sort_key)
                 
-                # 初始化 Day 預設值
                 if st.session_state['selected_day'] not in sorted_days:
                     st.session_state['selected_day'] = sorted_days[0] if sorted_days else None
-
-                def on_day_change():
-                    st.session_state['workout_df'] = pd.DataFrame() # 換天數清空
 
                 day = st.selectbox(
                     "選擇進度", 
                     sorted_days, 
-                    key='selected_day', # 自動綁定
+                    key='selected_day', 
                     on_change=on_day_change
                 )
 
-            # --- 數據載入 (鎖定邏輯) ---
-            # 只有當 workout_df 為空時，才讀取 DB
+            # --- 資料讀取 ---
+            # 邏輯：只在 workout_df 為空時 (代表剛切換選項) 讀取資料
             if st.session_state['workout_df'].empty:
                 df_view = df_plan[(df_plan["Plan_Name"] == plan_name) & (df_plan["Day"] == day)].copy()
                 student_rm = students_dict.get(student_key, {}).get("rm", {})
@@ -323,6 +328,7 @@ if students_dict:
                         })
                 st.session_state['workout_df'] = pd.DataFrame(final_rows)
 
+            # --- 新增/修改區 ---
             with st.expander("🛠️ 臨時新增/修改"):
                 if exercise_db:
                     col_a1, col_a2, col_a3 = st.columns([2, 2, 2])
@@ -343,17 +349,18 @@ if students_dict:
                                 st.rerun()
                             else: st.toast("⚠️ 請先勾選下方項目")
 
+            # --- 主表格 (綁定 on_change) ---
             edited_df = st.data_editor(
                 st.session_state['workout_df'],
                 hide_index=True, use_container_width=True, num_rows="dynamic",
+                key="workout_editor", # Key 綁定 session state
+                on_change=on_editor_change, # 🌟 資料變更時，觸發狀態更新
                 column_config={
                     "選取": st.column_config.CheckboxColumn("✅", width="small"),
                     "實際重量": st.column_config.NumberColumn("實際 kg", step=0.5),
                     "實際次數": st.column_config.NumberColumn("實際次數", step=1)
                 }
             )
-            # 關鍵：將編輯後的結果寫回 Session State
-            st.session_state['workout_df'] = edited_df
 
             if st.button("💾 紀錄主訓練", type="primary", use_container_width=True):
                 recs = []
@@ -416,4 +423,3 @@ if students_dict:
                     d_recs = df_show[df_show["DateStr"] == d_str]
                     with st.expander(f"{d_str} ({len(d_recs)} 筆)"):
                         st.dataframe(d_recs[["StudentID", "Exercise", "Weight", "Reps", "Note"]], hide_index=True)
-
